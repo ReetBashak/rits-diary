@@ -8,7 +8,7 @@ require('dotenv').config();
 const app = express();
 
 if (!fs.existsSync('./uploads')) {
-  fs.mkdirSync('./uploads');
+  // uploads handled via cloud
 }
 
 app.use(cors());
