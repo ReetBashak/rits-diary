@@ -1,0 +1,17 @@
+﻿@import "tailwindcss";
+
+@theme {
+  --color-tangerine-50: #fff8f1;
+  --color-tangerine-100: #feeedc;
+  --color-tangerine-200: #fed8b1;
+  --color-tangerine-300: #fdbb7d;
+  --color-tangerine-400: #fa9443;
+  --color-tangerine-500: #f57418;
+}
+
+body {
+  margin: 0;
+  background-color: #FFFDF9;
+  font-family: 'Comic Sans MS', 'Bubblegum Sans', 'Quicksand', sans-serif;
+  color: #4A3E3D;
+}
