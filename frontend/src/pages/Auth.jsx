@@ -1,22 +1,27 @@
 ﻿import { useState } from 'react';
 import axios from 'axios';
 
+const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000';
+
 export default function Auth({ onLoginSuccess }) {
   const [isRegister, setIsRegister] = useState(false);
   const [isForgot, setIsForgot] = useState(false);
   const [form, setForm] = useState({ username: '', email: '', password: '', resetToken: '', newPassword: '' });
   const [msg, setMsg] = useState('');
+  const [loading, setLoading] = useState(false);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
     setMsg('');
+    setLoading(true);
+
     try {
       if (isForgot) {
         if (!form.resetToken) {
-          const res = await axios.post('http://localhost:5000/api/auth/forgot-password', { email: form.email });
+          const res = await axios.post(`${API_BASE}/api/auth/forgot-password`, { email: form.email });
           setMsg(`Token: ${res.data.resetToken} (Paste below to reset)`);
         } else {
-          const res = await axios.post('http://localhost:5000/api/auth/reset-password', {
+          const res = await axios.post(`${API_BASE}/api/auth/reset-password`, {
             resetToken: form.resetToken,
             newPassword: form.newPassword
           });
@@ -25,13 +30,15 @@ export default function Auth({ onLoginSuccess }) {
         }
       } else {
         const endpoint = isRegister ? 'register' : 'login';
-        const res = await axios.post(`http://localhost:5000/api/auth/${endpoint}`, form);
+        const res = await axios.post(`${API_BASE}/api/auth/${endpoint}`, form);
         localStorage.setItem('token', res.data.token);
         localStorage.setItem('user', JSON.stringify(res.data.user));
         onLoginSuccess(res.data.user);
       }
     } catch (err) {
       setMsg(err.response?.data?.msg || 'Something went wrong!');
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -44,7 +51,11 @@ export default function Auth({ onLoginSuccess }) {
         </h2>
         <p className="text-xs text-stone-400 mb-6">"Viva La Vida — Live a colorful memory"</p>
 
-        {msg && <div className="p-2 mb-4 text-xs font-semibold bg-orange-100 text-orange-600 rounded-xl border border-orange-300">{msg}</div>}
+        {msg && (
+          <div className="p-2 mb-4 text-xs font-semibold bg-orange-100 text-orange-600 rounded-xl border border-orange-300">
+            {msg}
+          </div>
+        )}
 
         <form onSubmit={handleSubmit} className="flex flex-col gap-3">
           {isRegister && !isForgot && (
@@ -98,8 +109,12 @@ export default function Auth({ onLoginSuccess }) {
             </>
           )}
 
-          <button type="submit" className="mt-2 py-3 bg-orange-400 hover:bg-orange-500 text-white font-bold rounded-2xl shadow-md transform active:scale-95 transition cursor-pointer">
-            {isForgot ? (form.resetToken ? 'Update Passcode 🔑' : 'Send Reset Token 📨') : isRegister ? 'Enter Diary Land 🍓' : 'Unlock Diary 🔓'}
+          <button
+            type="submit"
+            disabled={loading}
+            className="mt-2 py-3 bg-orange-400 hover:bg-orange-500 text-white font-bold rounded-2xl shadow-md transform active:scale-95 transition cursor-pointer disabled:opacity-50"
+          >
+            {loading ? 'Please wait...' : isForgot ? (form.resetToken ? 'Update Passcode 🔑' : 'Send Reset Token 📨') : isRegister ? 'Enter Diary Land 🍓' : 'Unlock Diary 🔓'}
           </button>
         </form>
 

@@ -1,6 +1,8 @@
 ﻿import { useState, useEffect } from 'react';
 import axios from 'axios';
-import { Trash2, Edit3, X, Sparkles, Calendar, Plus, Paperclip, Eye } from 'lucide-react';
+import { Trash2, Edit3, X, Sparkles, Calendar, Paperclip, Eye } from 'lucide-react';
+
+const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000';
 
 const STICKER_CATEGORIES = {
   Moods: ['🍊', '🍓', '🍰', '🧸', '☁️', '🥑', '🍭', '🎨'],
@@ -27,7 +29,7 @@ export default function Dashboard({ themeConfig }) {
 
   const fetchEntries = async () => {
     try {
-      const res = await axios.get('http://localhost:5000/api/entries', {
+      const res = await axios.get(`${API_BASE}/api/entries`, {
         headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
       });
       setEntries(res.data);
@@ -52,7 +54,7 @@ export default function Dashboard({ themeConfig }) {
     if (file) formData.append('media', file);
 
     try {
-      await axios.post('http://localhost:5000/api/entries', formData, {
+      await axios.post(`${API_BASE}/api/entries`, formData, {
         headers: {
           'Content-Type': 'multipart/form-data',
           Authorization: `Bearer ${localStorage.getItem('token')}`
@@ -80,7 +82,7 @@ export default function Dashboard({ themeConfig }) {
     if (editFile) formData.append('media', editFile);
 
     try {
-      const res = await axios.put(`http://localhost:5000/api/entries/${selectedEntry._id}`, formData, {
+      const res = await axios.put(`${API_BASE}/api/entries/${selectedEntry._id}`, formData, {
         headers: {
           'Content-Type': 'multipart/form-data',
           Authorization: `Bearer ${localStorage.getItem('token')}`
@@ -98,7 +100,7 @@ export default function Dashboard({ themeConfig }) {
 
   const handleDelete = async (id) => {
     try {
-      await axios.delete(`http://localhost:5000/api/entries/${id}`, {
+      await axios.delete(`${API_BASE}/api/entries/${id}`, {
         headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
       });
       setEntries(entries.filter(entry => entry._id !== id));
@@ -214,7 +216,7 @@ export default function Dashboard({ themeConfig }) {
                   <Calendar className="w-3 h-3" />
                   <span>{new Date(entry.createdAt).toLocaleDateString()}</span>
                   {entry.mediaType !== 'none' && (
-                    <span className="px-1.5 py-0.2 bg-black/5 rounded text-[10px] uppercase font-bold">
+                    <span className="px-1.5 py-0.5 bg-black/5 rounded text-[10px] uppercase font-bold">
                       {entry.mediaType}
                     </span>
                   )}
@@ -233,9 +235,8 @@ export default function Dashboard({ themeConfig }) {
 
       {/* Reader & Editor Modal */}
       {selectedEntry && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm animate-fadeIn">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
           <div className={`w-full max-w-lg border-2 rounded-[2rem] p-6 shadow-2xl space-y-4 max-h-[90vh] overflow-y-auto ${themeConfig.cardBg} ${themeConfig.borderColor}`}>
-            {/* Modal Header */}
             <div className="flex justify-between items-center border-b pb-3 border-black/10 dark:border-white/10">
               <div className="flex items-center gap-2">
                 <span className="text-2xl">{isEditing ? editEmoji : selectedEntry.moodEmoji}</span>
@@ -251,7 +252,6 @@ export default function Dashboard({ themeConfig }) {
               </button>
             </div>
 
-            {/* Modal Body: View vs Edit Mode */}
             {!isEditing ? (
               <div className="space-y-4">
                 <h2 className={`font-extrabold text-xl ${themeConfig.primaryText}`}>{selectedEntry.title}</h2>
@@ -260,16 +260,16 @@ export default function Dashboard({ themeConfig }) {
                 {selectedEntry.mediaUrl && (
                   <div className="rounded-2xl overflow-hidden border border-black/10">
                     {selectedEntry.mediaType === 'image' && (
-                      <img src={`http://localhost:5000${selectedEntry.mediaUrl}`} alt="Memory" className="w-full max-h-72 object-cover" />
+                      <img src={`${API_BASE}${selectedEntry.mediaUrl}`} alt="Memory" className="w-full max-h-72 object-cover" />
                     )}
                     {selectedEntry.mediaType === 'video' && (
                       <video controls className="w-full max-h-72">
-                        <source src={`http://localhost:5000${selectedEntry.mediaUrl}`} />
+                        <source src={`${API_BASE}${selectedEntry.mediaUrl}`} />
                       </video>
                     )}
                     {selectedEntry.mediaType === 'audio' && (
                       <audio controls className="w-full p-2">
-                        <source src={`http://localhost:5000${selectedEntry.mediaUrl}`} />
+                        <source src={`${API_BASE}${selectedEntry.mediaUrl}`} />
                       </audio>
                     )}
                   </div>
@@ -310,7 +310,6 @@ export default function Dashboard({ themeConfig }) {
               </div>
             )}
 
-            {/* Modal Actions */}
             <div className="flex justify-between items-center pt-3 border-t border-black/10 dark:border-white/10">
               <button
                 onClick={() => handleDelete(selectedEntry._id)}
