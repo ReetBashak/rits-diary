@@ -1,92 +1,33 @@
 const express = require('express');
-const multer = require('multer');
-const path = require('path');
-const auth = require('../middleware/auth');
-const Entry = require('../models/Entry');
-const router = express.Router();
+const mongoose = require('mongoose');
+const cors = require('cors');
+require('dotenv').config();
 
-const storage = multer.diskStorage({
-  destination: (req, file, cb) => cb(null, 'uploads/'),
-  filename: (req, file, cb) => cb(null, `${Date.now()}-${file.originalname.replace(/\s+/g, '_')}`)
-});
-const upload = multer({ storage });
+const app = express();
 
-// Get all entries
-router.get('/', auth, async (req, res) => {
-  try {
-    const entries = await Entry.find({ userId: req.user.id }).sort({ createdAt: -1 });
-    res.json(entries);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
+app.use(cors());
+app.use(express.json());
+
+// Root test route taaki Vercel par 404 na aaye
+app.get('/', (req, res) => {
+  res.send('🍊 Tangerine Diary Backend is Live & Running on Vercel!');
 });
 
-// Create entry
-router.post('/', [auth, upload.single('media')], async (req, res) => {
-  try {
-    const { title, content, moodEmoji } = req.body;
-    let mediaUrl = null;
-    let mediaType = 'none';
+// API Routes
+app.use('/api/auth', require('./routes/auth'));
+app.use('/api/entries', require('./routes/entries'));
 
-    if (req.file) {
-      mediaUrl = `/uploads/${req.file.filename}`;
-      const mime = req.file.mimetype;
-      if (mime.startsWith('image/')) mediaType = 'image';
-      else if (mime.startsWith('video/')) mediaType = 'video';
-      else if (mime.startsWith('audio/')) mediaType = 'audio';
-    }
+// Database Connection
+mongoose.connect(process.env.MONGO_URI)
+  .then(() => console.log('🍃 MongoDB Connected'))
+  .catch(err => console.error('DB Connection Failed:', err));
 
-    const newEntry = new Entry({
-      userId: req.user.id,
-      title,
-      content,
-      moodEmoji,
-      mediaUrl,
-      mediaType
-    });
+// Local development ke liye listen
+if (process.env.NODE_ENV !== 'production') {
+  const PORT = process.env.PORT || 5000;
+  app.listen(PORT, () => {
+    console.log(`🍊 Tangerine Diary Server running on port ${PORT}`);
+  });
+}
 
-    const saved = await newEntry.save();
-    res.json(saved);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// Edit / Update entry
-router.put('/:id', [auth, upload.single('media')], async (req, res) => {
-  try {
-    const { title, content, moodEmoji } = req.body;
-    const entry = await Entry.findOne({ _id: req.params.id, userId: req.user.id });
-    if (!entry) return res.status(404).json({ msg: 'Entry not found' });
-
-    entry.title = title || entry.title;
-    entry.content = content !== undefined ? content : entry.content;
-    entry.moodEmoji = moodEmoji || entry.moodEmoji;
-
-    if (req.file) {
-      entry.mediaUrl = `/uploads/${req.file.filename}`;
-      const mime = req.file.mimetype;
-      if (mime.startsWith('image/')) entry.mediaType = 'image';
-      else if (mime.startsWith('video/')) entry.mediaType = 'video';
-      else if (mime.startsWith('audio/')) entry.mediaType = 'audio';
-    }
-
-    const updated = await entry.save();
-    res.json(updated);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// Delete entry
-router.delete('/:id', auth, async (req, res) => {
-  try {
-    const entry = await Entry.findOneAndDelete({ _id: req.params.id, userId: req.user.id });
-    if (!entry) return res.status(404).json({ msg: 'Entry not found' });
-    res.json({ msg: 'Deleted successfully' });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-module.exports = router;
+module.exports = app;
