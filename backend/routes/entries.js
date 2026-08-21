@@ -6,29 +6,29 @@ const cloudinary = require('cloudinary').v2;
 const { CloudinaryStorage } = require('multer-storage-cloudinary');
 const multer = require('multer');
 
-// Cloudinary Configuration
+// Cloudinary Config
 cloudinary.config({
   cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
   api_key: process.env.CLOUDINARY_API_KEY,
   api_secret: process.env.CLOUDINARY_API_SECRET
 });
 
-// Multer Storage Setup
+// Cloudinary Multer Storage
 const storage = new CloudinaryStorage({
   cloudinary: cloudinary,
   params: {
     folder: 'rits_diary_media',
     resource_type: 'auto',
-    allowed_formats: ['jpg', 'png', 'jpeg', 'webp', 'mp4', 'mov', 'webm', 'mp3', 'wav', 'm4a', 'ogg']
+    allowed_formats: ['jpg', 'png', 'jpeg', 'webp', 'gif', 'mp4', 'mov', 'webm', 'mp3', 'wav', 'm4a', 'ogg']
   }
 });
 
 const upload = multer({ 
   storage: storage,
-  limits: { fileSize: 10 * 1024 * 1024 } // 10MB limit
+  limits: { fileSize: 15 * 1024 * 1024 }
 });
 
-// 1. Get All Entries for Logged-in User
+// 1. Get All Entries
 router.get('/', auth, async (req, res) => {
   try {
     const entries = await Entry.find({ userId: req.user.id }).sort({ createdAt: -1 });
@@ -38,7 +38,7 @@ router.get('/', auth, async (req, res) => {
   }
 });
 
-// 2. Create New Entry (Handles Text, Media Files & Recorded Audio/Video)
+// 2. Create Entry (Ensuring HTTPS Clean URL)
 router.post('/', auth, upload.single('media'), async (req, res) => {
   try {
     const { title, content, moodEmoji } = req.body;
@@ -46,14 +46,13 @@ router.post('/', auth, upload.single('media'), async (req, res) => {
     let mediaType = 'none';
 
     if (req.file) {
-      mediaUrl = req.file.path || req.file.secure_url;
+      // Cloudinary safe https URL extraction
+      mediaUrl = req.file.secure_url || req.file.path || req.file.url;
       const mime = req.file.mimetype || '';
       
-      if (mime.startsWith('image/')) {
-        mediaType = 'image';
-      } else if (mime.startsWith('video/')) {
+      if (mime.startsWith('video/') || (mediaUrl && mediaUrl.match(/\.(mp4|mov|webm)$/i))) {
         mediaType = 'video';
-      } else if (mime.startsWith('audio/')) {
+      } else if (mime.startsWith('audio/') || (mediaUrl && mediaUrl.match(/\.(mp3|wav|m4a|ogg)$/i))) {
         mediaType = 'audio';
       } else {
         mediaType = 'image';
@@ -62,7 +61,7 @@ router.post('/', auth, upload.single('media'), async (req, res) => {
 
     const newEntry = new Entry({
       userId: req.user.id,
-      title: title || 'Untitled Entry',
+      title: title || 'Untitled Memory',
       content: content || '',
       moodEmoji: moodEmoji || '🍊',
       mediaUrl: mediaUrl,

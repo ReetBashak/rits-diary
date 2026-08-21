@@ -1,6 +1,6 @@
 ﻿import { useState, useEffect, useRef } from 'react';
 import axios from 'axios';
-import { Trash2, Sparkles, Calendar, Paperclip, Eye, Mic, Square, Camera, X } from 'lucide-react';
+import { Trash2, Sparkles, Calendar, Paperclip, Eye, Mic, Square, Camera, X, Image as ImageIcon } from 'lucide-react';
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000';
 
@@ -17,10 +17,11 @@ export default function Dashboard({ themeConfig }) {
   const [content, setContent] = useState('');
   const [moodEmoji, setMoodEmoji] = useState('🍊');
   const [file, setFile] = useState(null);
+  const [previewUrl, setPreviewUrl] = useState(null);
   const [loading, setLoading] = useState(false);
   const [selectedEntry, setSelectedEntry] = useState(null);
 
-  // Audio Recording States
+  // Recording State
   const [isRecording, setIsRecording] = useState(false);
   const mediaRecorderRef = useRef(null);
   const audioChunksRef = useRef([]);
@@ -40,7 +41,17 @@ export default function Dashboard({ themeConfig }) {
     fetchEntries();
   }, []);
 
-  // Voice Note Recording
+  const handleFileChange = (selected) => {
+    if (selected) {
+      setFile(selected);
+      if (selected.type.startsWith('image/')) {
+        setPreviewUrl(URL.createObjectURL(selected));
+      } else {
+        setPreviewUrl(null);
+      }
+    }
+  };
+
   const startRecording = async () => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -61,7 +72,7 @@ export default function Dashboard({ themeConfig }) {
       mediaRecorderRef.current.start();
       setIsRecording(true);
     } catch (err) {
-      alert('Microphone permission denied or not available.');
+      alert('Microphone permission denied.');
     }
   };
 
@@ -85,17 +96,16 @@ export default function Dashboard({ themeConfig }) {
 
     try {
       await axios.post(`${API_BASE}/api/entries`, formData, {
-        headers: {
-          Authorization: `Bearer ${localStorage.getItem('token')}`
-        }
+        headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
       });
       setTitle('');
       setContent('');
       setFile(null);
+      setPreviewUrl(null);
       fetchEntries();
     } catch (err) {
       console.error(err);
-      alert('Failed to save memory. Please check media format.');
+      alert('Failed to upload. Please check image format.');
     } finally {
       setLoading(false);
     }
@@ -111,12 +121,6 @@ export default function Dashboard({ themeConfig }) {
     } catch (err) {
       console.error(err);
     }
-  };
-
-  // Safe Cloudinary / URL resolver
-  const getMediaSource = (url) => {
-    if (!url) return '';
-    return url.startsWith('http') ? url : `${API_BASE}${url}`;
   };
 
   return (
@@ -164,9 +168,19 @@ export default function Dashboard({ themeConfig }) {
             onChange={(e) => setContent(e.target.value)}
           />
 
+          {/* Local File Preview */}
+          {previewUrl && (
+            <div className="relative w-24 h-24 rounded-2xl overflow-hidden border-2 border-orange-300">
+              <img src={previewUrl} alt="Preview" className="w-full h-full object-cover" />
+              <X 
+                className="absolute top-1 right-1 w-5 h-5 bg-black/60 text-white rounded-full p-0.5 cursor-pointer" 
+                onClick={() => { setFile(null); setPreviewUrl(null); }} 
+              />
+            </div>
+          )}
+
           <div className="flex flex-wrap justify-between items-center gap-3 pt-1">
             <div className="flex flex-wrap items-center gap-2">
-              {/* File Attachment (Gallery / Documents) */}
               <label className={`cursor-pointer flex items-center gap-1.5 px-3.5 py-2 rounded-full text-xs font-bold transition shadow-sm ${themeConfig.buttonSecondary}`}>
                 <Paperclip className="w-3.5 h-3.5" />
                 <span>Media</span>
@@ -174,11 +188,10 @@ export default function Dashboard({ themeConfig }) {
                   type="file"
                   className="hidden"
                   accept="image/*,video/*,audio/*"
-                  onChange={(e) => setFile(e.target.files[0])}
+                  onChange={(e) => handleFileChange(e.target.files[0])}
                 />
               </label>
 
-              {/* Direct Camera Capture (Phone / Web) */}
               <label className={`cursor-pointer flex items-center gap-1.5 px-3.5 py-2 rounded-full text-xs font-bold transition shadow-sm ${themeConfig.buttonSecondary}`}>
                 <Camera className="w-3.5 h-3.5" />
                 <span>Snap</span>
@@ -187,11 +200,10 @@ export default function Dashboard({ themeConfig }) {
                   className="hidden"
                   accept="image/*"
                   capture="environment"
-                  onChange={(e) => setFile(e.target.files[0])}
+                  onChange={(e) => handleFileChange(e.target.files[0])}
                 />
               </label>
 
-              {/* Live Voice Memo Record */}
               {!isRecording ? (
                 <button
                   type="button"
@@ -211,9 +223,9 @@ export default function Dashboard({ themeConfig }) {
               )}
             </div>
 
-            {file && (
+            {file && !previewUrl && (
               <div className="flex items-center gap-1 bg-black/5 px-2.5 py-1 rounded-full text-xs">
-                <span className="truncate max-w-[150px] font-semibold">{file.name}</span>
+                <span className="truncate max-w-[140px] font-semibold">{file.name}</span>
                 <X className="w-3.5 h-3.5 cursor-pointer text-rose-500" onClick={() => setFile(null)} />
               </div>
             )}
@@ -237,43 +249,57 @@ export default function Dashboard({ themeConfig }) {
         </h3>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+      {/* Entry Cards */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         {entries.map((entry) => (
           <div
             key={entry._id}
             onClick={() => setSelectedEntry(entry)}
-            className={`border rounded-2xl p-4 shadow-sm hover:shadow-md transition-all cursor-pointer flex items-center justify-between gap-4 group ${themeConfig.cardBg} ${themeConfig.borderColor}`}
+            className={`border rounded-2xl p-4 shadow-sm hover:shadow-md transition-all cursor-pointer flex flex-col justify-between gap-3 group ${themeConfig.cardBg} ${themeConfig.borderColor}`}
           >
-            <div className="flex items-center gap-3 min-w-0">
-              <span className="text-2xl p-2 bg-black/5 dark:bg-white/5 rounded-2xl shrink-0 group-hover:scale-110 transition-transform">
-                {entry.moodEmoji}
-              </span>
-              <div className="min-w-0">
-                <h4 className={`font-bold text-sm truncate ${themeConfig.primaryText}`}>{entry.title}</h4>
-                <div className="flex items-center gap-2 text-[11px] opacity-60">
-                  <Calendar className="w-3 h-3" />
-                  <span>{new Date(entry.createdAt).toLocaleDateString()}</span>
-                  {entry.mediaType !== 'none' && (
-                    <span className="px-1.5 py-0.5 bg-black/5 rounded text-[10px] uppercase font-bold">
-                      {entry.mediaType}
-                    </span>
-                  )}
+            <div className="flex items-start justify-between gap-3">
+              <div className="flex items-center gap-3 min-w-0">
+                <span className="text-2xl p-2 bg-black/5 dark:bg-white/5 rounded-2xl shrink-0 group-hover:scale-110 transition-transform">
+                  {entry.moodEmoji}
+                </span>
+                <div className="min-w-0">
+                  <h4 className={`font-bold text-sm truncate ${themeConfig.primaryText}`}>{entry.title}</h4>
+                  <div className="flex items-center gap-2 text-[11px] opacity-60">
+                    <Calendar className="w-3 h-3" />
+                    <span>{new Date(entry.createdAt).toLocaleDateString()}</span>
+                  </div>
                 </div>
               </div>
-            </div>
 
-            <div className="flex items-center gap-1 shrink-0 opacity-80 group-hover:opacity-100">
               <span className="text-xs font-bold px-2.5 py-1 rounded-full bg-black/5 dark:bg-white/10 flex items-center gap-1">
-                <Eye className="w-3 h-3" /> Read
+                <Eye className="w-3 h-3" /> Open
               </span>
             </div>
+
+            {/* In-Card Media Thumbnail Preview */}
+            {entry.mediaUrl && entry.mediaType === 'image' && (
+              <div className="w-full h-36 rounded-xl overflow-hidden border border-black/5">
+                <img 
+                  src={entry.mediaUrl} 
+                  alt={entry.title} 
+                  className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300" 
+                  crossOrigin="anonymous"
+                />
+              </div>
+            )}
+
+            {entry.mediaUrl && entry.mediaType !== 'image' && (
+              <div className="text-xs font-semibold px-2.5 py-1 rounded-lg bg-black/5 flex items-center gap-1 w-fit uppercase">
+                <ImageIcon className="w-3 h-3" /> {entry.mediaType} attached
+              </div>
+            )}
           </div>
         ))}
       </div>
 
-      {/* Viewer Modal */}
+      {/* Full Viewer Modal */}
       {selectedEntry && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
           <div className={`w-full max-w-lg border-2 rounded-[2rem] p-6 shadow-2xl space-y-4 max-h-[90vh] overflow-y-auto ${themeConfig.cardBg} ${themeConfig.borderColor}`}>
             <div className="flex justify-between items-center border-b pb-3 border-black/10 dark:border-white/10">
               <div className="flex items-center gap-2">
@@ -282,7 +308,7 @@ export default function Dashboard({ themeConfig }) {
               </div>
               <button
                 onClick={() => setSelectedEntry(null)}
-                className="p-1 rounded-full hover:bg-black/10 dark:hover:bg-white/10 transition cursor-pointer"
+                className="p-1 rounded-full hover:bg-black/10 transition cursor-pointer"
               >
                 <X className="w-5 h-5" />
               </button>
@@ -290,21 +316,28 @@ export default function Dashboard({ themeConfig }) {
 
             <div className="space-y-4">
               <h2 className={`font-extrabold text-xl ${themeConfig.primaryText}`}>{selectedEntry.title}</h2>
-              <p className="text-sm whitespace-pre-wrap leading-relaxed opacity-90">{selectedEntry.content}</p>
+              {selectedEntry.content && (
+                <p className="text-sm whitespace-pre-wrap leading-relaxed opacity-90">{selectedEntry.content}</p>
+              )}
 
               {selectedEntry.mediaUrl && (
-                <div className="rounded-2xl overflow-hidden border border-black/10">
+                <div className="rounded-2xl overflow-hidden border border-black/10 bg-black/5">
                   {selectedEntry.mediaType === 'image' && (
-                    <img src={getMediaSource(selectedEntry.mediaUrl)} alt="Memory" className="w-full max-h-80 object-cover" />
+                    <img 
+                      src={selectedEntry.mediaUrl} 
+                      alt={selectedEntry.title} 
+                      className="w-full max-h-96 object-contain" 
+                      crossOrigin="anonymous"
+                    />
                   )}
                   {selectedEntry.mediaType === 'video' && (
-                    <video controls className="w-full max-h-80">
-                      <source src={getMediaSource(selectedEntry.mediaUrl)} />
+                    <video controls className="w-full max-h-96">
+                      <source src={selectedEntry.mediaUrl} />
                     </video>
                   )}
                   {selectedEntry.mediaType === 'audio' && (
                     <audio controls className="w-full p-3">
-                      <source src={getMediaSource(selectedEntry.mediaUrl)} />
+                      <source src={selectedEntry.mediaUrl} />
                     </audio>
                   )}
                 </div>
@@ -314,9 +347,9 @@ export default function Dashboard({ themeConfig }) {
             <div className="flex justify-between items-center pt-3 border-t border-black/10 dark:border-white/10">
               <button
                 onClick={() => handleDelete(selectedEntry._id)}
-                className="flex items-center gap-1 text-xs font-bold text-rose-500 hover:text-rose-600 p-2 rounded-lg hover:bg-rose-50 dark:hover:bg-rose-950/20 transition cursor-pointer"
+                className="flex items-center gap-1 text-xs font-bold text-rose-500 hover:text-rose-600 p-2 rounded-lg hover:bg-rose-50 transition cursor-pointer"
               >
-                <Trash2 className="w-4 h-4" /> Delete
+                <Trash2 className="w-4 h-4" /> Delete Memory
               </button>
             </div>
           </div>
