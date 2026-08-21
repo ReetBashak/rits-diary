@@ -1,9 +1,18 @@
 const express = require('express');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
-const crypto = require('crypto');
+const nodemailer = require('nodemailer');
 const User = require('../models/User');
 const router = express.Router();
+
+// Email Transporter Setup
+const transporter = nodemailer.createTransport({
+  service: 'gmail',
+  auth: {
+    user: process.env.EMAIL_USER,
+    pass: process.env.EMAIL_PASS
+  }
+});
 
 // Register
 router.post('/register', async (req, res) => {
@@ -42,42 +51,61 @@ router.post('/login', async (req, res) => {
   }
 });
 
-// Forgot Password Request
+// Forgot Password - Send 6-Digit OTP via Email
 router.post('/forgot-password', async (req, res) => {
   try {
     const { email } = req.body;
     const user = await User.findOne({ email });
-    if (!user) return res.status(404).json({ msg: 'Email not found' });
+    if (!user) return res.status(404).json({ msg: 'Registered email not found!' });
 
-    const resetToken = crypto.randomBytes(20).toString('hex');
-    user.resetToken = resetToken;
-    user.resetTokenExpiry = Date.now() + 3600000; // 1 hour
+    // Generate 6 Digit Numeric OTP
+    const otp = Math.floor(100000 + Math.random() * 900000).toString();
+    user.resetOtp = otp;
+    user.resetOtpExpiry = new Date(Date.now() + 10 * 60 * 1000); // 10 Mins Expiry
     await user.save();
 
-    // For quick local testing, we return the token directly
-    res.json({ msg: 'Reset link generated!', resetToken });
+    // Mail send only if credentials exist
+    if (process.env.EMAIL_USER && process.env.EMAIL_PASS) {
+      await transporter.sendMail({
+        from: `"Tangerine Diary" <${process.env.EMAIL_USER}>`,
+        to: user.email,
+        subject: '🍊 Tangerine Diary - Password Reset OTP',
+        html: `
+          <div style="font-family: sans-serif; padding: 20px; border-radius: 8px; border: 1px solid #ffd8a8; background-color: #fff9db;">
+            <h2 style="color: #e8590c;">Tangerine Diary Security</h2>
+            <p>Your one-time password (OTP) to reset your password is:</p>
+            <h1 style="color: #d9480f; letter-spacing: 4px;">${otp}</h1>
+            <p>This code is valid for 10 minutes. If you did not request this, please ignore this email.</p>
+          </div>
+        `
+      });
+    }
+
+    res.json({ msg: 'OTP has been sent to your registered email address!' });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
 
-// Reset Password Execution
+// Reset Password Execution using OTP
 router.post('/reset-password', async (req, res) => {
   try {
-    const { resetToken, newPassword } = req.body;
+    const { email, otp, newPassword } = req.body;
     const user = await User.findOne({
-      resetToken,
-      resetTokenExpiry: { $gt: Date.now() }
+      email,
+      resetOtp: otp,
+      resetOtpExpiry: { $gt: Date.now() }
     });
-    if (!user) return res.status(400).json({ msg: 'Token expired or invalid' });
+
+    if (!user) return res.status(400).json({ msg: 'Invalid or expired OTP!' });
 
     const salt = await bcrypt.genSalt(10);
     user.password = await bcrypt.hash(newPassword, salt);
-    user.resetToken = undefined;
-    user.resetTokenExpiry = undefined;
+    user.resetOtp = null;
+    user.resetOtpExpiry = null;
     await user.save();
 
-    res.json({ msg: 'Password successfully updated! You can now log in.' });
+    res.json({ msg: 'Password updated successfully! You can now log in.' });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
