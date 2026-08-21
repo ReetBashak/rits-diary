@@ -6,7 +6,8 @@ const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000';
 export default function Auth({ onLoginSuccess }) {
   const [isRegister, setIsRegister] = useState(false);
   const [isForgot, setIsForgot] = useState(false);
-  const [form, setForm] = useState({ username: '', email: '', password: '', resetToken: '', newPassword: '' });
+  const [otpSent, setOtpSent] = useState(false);
+  const [form, setForm] = useState({ username: '', email: '', password: '', otp: '', newPassword: '' });
   const [msg, setMsg] = useState('');
   const [loading, setLoading] = useState(false);
 
@@ -17,16 +18,19 @@ export default function Auth({ onLoginSuccess }) {
 
     try {
       if (isForgot) {
-        if (!form.resetToken) {
+        if (!otpSent) {
           const res = await axios.post(`${API_BASE}/api/auth/forgot-password`, { email: form.email });
-          setMsg(`Token: ${res.data.resetToken} (Paste below to reset)`);
+          setMsg(res.data.msg || 'OTP sent to your email!');
+          setOtpSent(true);
         } else {
           const res = await axios.post(`${API_BASE}/api/auth/reset-password`, {
-            resetToken: form.resetToken,
+            email: form.email,
+            otp: form.otp,
             newPassword: form.newPassword
           });
           setMsg(res.data.msg);
           setIsForgot(false);
+          setOtpSent(false);
         }
       } else {
         const endpoint = isRegister ? 'register' : 'login';
@@ -36,7 +40,7 @@ export default function Auth({ onLoginSuccess }) {
         onLoginSuccess(res.data.user);
       }
     } catch (err) {
-      setMsg(err.response?.data?.msg || 'Something went wrong!');
+      setMsg(err.response?.data?.msg || err.response?.data?.error || 'Something went wrong!');
     } finally {
       setLoading(false);
     }
@@ -88,15 +92,16 @@ export default function Auth({ onLoginSuccess }) {
               required
             />
           ) : (
-            <>
-              <input
-                type="text"
-                placeholder="Paste Reset Token..."
-                className="px-4 py-2.5 rounded-2xl bg-purple-50 border border-purple-200 focus:outline-none text-sm"
-                value={form.resetToken}
-                onChange={(e) => setForm({ ...form, resetToken: e.target.value })}
-              />
-              {form.resetToken && (
+            otpSent && (
+              <>
+                <input
+                  type="text"
+                  placeholder="Enter 6-digit Email OTP..."
+                  className="px-4 py-2.5 rounded-2xl bg-purple-50 border border-purple-200 focus:outline-none text-sm text-center font-bold tracking-widest"
+                  value={form.otp}
+                  onChange={(e) => setForm({ ...form, otp: e.target.value })}
+                  required
+                />
                 <input
                   type="password"
                   placeholder="Enter brand new password..."
@@ -105,8 +110,8 @@ export default function Auth({ onLoginSuccess }) {
                   onChange={(e) => setForm({ ...form, newPassword: e.target.value })}
                   required
                 />
-              )}
-            </>
+              </>
+            )
           )}
 
           <button
@@ -114,7 +119,7 @@ export default function Auth({ onLoginSuccess }) {
             disabled={loading}
             className="mt-2 py-3 bg-orange-400 hover:bg-orange-500 text-white font-bold rounded-2xl shadow-md transform active:scale-95 transition cursor-pointer disabled:opacity-50"
           >
-            {loading ? 'Please wait...' : isForgot ? (form.resetToken ? 'Update Passcode 🔑' : 'Send Reset Token 📨') : isRegister ? 'Enter Diary Land 🍓' : 'Unlock Diary 🔓'}
+            {loading ? 'Please wait...' : isForgot ? (otpSent ? 'Update Password 🔑' : 'Send 6-Digit OTP 📨') : isRegister ? 'Enter Diary Land 🍓' : 'Unlock Diary 🔓'}
           </button>
         </form>
 
@@ -129,7 +134,7 @@ export default function Auth({ onLoginSuccess }) {
               </span>
             </>
           ) : (
-            <span className="cursor-pointer text-orange-500 hover:underline" onClick={() => setIsForgot(false)}>
+            <span className="cursor-pointer text-orange-500 hover:underline" onClick={() => { setIsForgot(false); setOtpSent(false); }}>
               Back to Login
             </span>
           )}
