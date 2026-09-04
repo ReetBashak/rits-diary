@@ -1,7 +1,6 @@
 ﻿import { useState, useEffect, useRef } from 'react';
 import axios from 'axios';
-import { Trash2, Sparkles, Calendar, Paperclip, Eye, Mic, Square, Camera, X, WifiOff, RefreshCw, Image as ImageIcon } from 'lucide-react';
-import { saveOfflineEntry, getOfflineEntries, deleteOfflineEntry } from '../utils/offlineStorage';
+import { Trash2, Sparkles, Calendar, Paperclip, Eye, Mic, Square, Camera, X, WifiOff, RefreshCw, Image as ImageIcon, LogOut } from 'lucide-react';
 
 const API_BASE = (import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000').replace(/\/$/, '');
 
@@ -12,22 +11,9 @@ const STICKER_CATEGORIES = {
   Gaming: ['🎮', '👾', '🕹️', '⚡', '🎧', '🏆', '🔥', '⚔️'],
 };
 
-// Helper to turn base64 back into actual file for Cloudinary upload
-function dataURLtoFile(dataurl, filename) {
-  const arr = dataurl.split(',');
-  const mime = arr[0].match(/:(.*?);/)[1];
-  const bstr = atob(arr[1]);
-  let n = bstr.length;
-  const u8arr = new Uint8Array(n);
-  while (n--) {
-    u8arr[n] = bstr.charCodeAt(n);
-  }
-  return new File([u8arr], filename, { type: mime });
-}
-
 export default function Dashboard({ themeConfig }) {
   const [entries, setEntries] = useState([]);
-  const [offlineList, setOfflineList] = useState([]);
+  const [offlineEntries, setOfflineEntries] = useState([]);
   const [isOnline, setIsOnline] = useState(navigator.onLine);
   const [title, setTitle] = useState('');
   const [content, setContent] = useState('');
@@ -42,11 +28,17 @@ export default function Dashboard({ themeConfig }) {
   const mediaRecorderRef = useRef(null);
   const audioChunksRef = useRef([]);
 
-  const refreshOfflineEntries = async () => {
-    const list = await getOfflineEntries();
-    setOfflineList(list);
+  // Local storage se offline entries read karna
+  const loadOfflineFromStorage = () => {
+    try {
+      const saved = JSON.parse(localStorage.getItem('viva_offline_notes') || '[]');
+      setOfflineEntries(saved);
+    } catch {
+      setOfflineEntries([]);
+    }
   };
 
+  // Cloud se memories laana
   const fetchEntries = async () => {
     const token = localStorage.getItem('token');
     if (!token) return;
@@ -60,56 +52,43 @@ export default function Dashboard({ themeConfig }) {
         setEntries(res.data);
       }
     } catch (err) {
-      console.warn('Fetch entries failed:', err.message);
+      console.warn('Live fetch error:', err.message);
     }
   };
 
+  // Offline notes ko cloud par bhejna
   const syncOfflineEntries = async () => {
-    if (!navigator.onLine || syncing) return;
+    const saved = JSON.parse(localStorage.getItem('viva_offline_notes') || '[]');
+    if (!navigator.onLine || saved.length === 0 || syncing) return;
+
     setSyncing(true);
+    const remaining = [];
 
-    try {
-      const pending = await getOfflineEntries();
-      if (!pending || pending.length === 0) {
-        setSyncing(false);
-        return;
+    for (const item of saved) {
+      const formData = new FormData();
+      formData.append('title', item.title);
+      formData.append('content', item.content);
+      formData.append('moodEmoji', item.moodEmoji);
+
+      try {
+        await axios.post(`${API_BASE}/api/entries`, formData, {
+          headers: { Authorization: `Bearer ${localStorage.getItem('token')}` },
+          timeout: 20000
+        });
+      } catch {
+        remaining.push(item);
       }
-
-      for (const item of pending) {
-        const formData = new FormData();
-        formData.append('title', item.title || 'Untitled Memory');
-        formData.append('content', item.content || '');
-        formData.append('moodEmoji', item.moodEmoji || '🍊');
-
-        if (item.base64File) {
-          const recoveredFile = dataURLtoFile(item.base64File, item.fileName || 'offline-media.jpg');
-          formData.append('media', recoveredFile);
-        }
-
-        try {
-          await axios.post(`${API_BASE}/api/entries`, formData, {
-            headers: { Authorization: `Bearer ${localStorage.getItem('token')}` },
-            timeout: 30000
-          });
-          // Upload kamyab hone par offline se delete karein
-          await deleteOfflineEntry(item.id);
-        } catch (itemErr) {
-          console.error('Error syncing individual entry:', item.id, itemErr);
-        }
-      }
-
-      await refreshOfflineEntries();
-      await fetchEntries();
-    } catch (err) {
-      console.error('Global sync failed:', err);
-    } finally {
-      setSyncing(false);
     }
+
+    localStorage.setItem('viva_offline_notes', JSON.stringify(remaining));
+    setOfflineEntries(remaining);
+    setSyncing(false);
+    fetchEntries();
   };
 
   useEffect(() => {
     fetchEntries();
-    refreshOfflineEntries();
+    loadOfflineFromStorage();
 
     const handleOnline = () => {
       setIsOnline(true);
@@ -157,7 +136,7 @@ export default function Dashboard({ themeConfig }) {
 
       mediaRecorderRef.current.start();
       setIsRecording(true);
-    } catch (err) {
+    } catch {
       alert('Microphone permission denied.');
     }
   };
@@ -174,39 +153,51 @@ export default function Dashboard({ themeConfig }) {
     if (!title.trim()) return;
     setLoading(true);
 
-    const memoryPayload = { title, content, moodEmoji };
-    const currentFile = file;
+    const memoryItem = {
+      id: Date.now(),
+      title: title.trim(),
+      content: content.trim(),
+      moodEmoji,
+      createdAt: new Date().toISOString()
+    };
 
-    // Reset UI inputs
-    setTitle('');
-    setContent('');
-    setFile(null);
-    setPreviewUrl(null);
-
-    // Agar internet chalu hai toh sidha upload
+    // Online Mode
     if (navigator.onLine) {
       const formData = new FormData();
-      formData.append('title', memoryPayload.title);
-      formData.append('content', memoryPayload.content);
-      formData.append('moodEmoji', memoryPayload.moodEmoji);
-      if (currentFile) formData.append('media', currentFile);
+      formData.append('title', memoryItem.title);
+      formData.append('content', memoryItem.content);
+      formData.append('moodEmoji', memoryItem.moodEmoji);
+      if (file) formData.append('media', file);
 
       try {
         const res = await axios.post(`${API_BASE}/api/entries`, formData, {
           headers: { Authorization: `Bearer ${localStorage.getItem('token')}` },
           timeout: 25000
         });
-        setEntries((prev) => [res.data, ...prev]);
+
+        // Turant timeline par dikhao
+        setEntries(prev => [res.data, ...prev]);
+        setTitle('');
+        setContent('');
+        setFile(null);
+        setPreviewUrl(null);
         setLoading(false);
         return;
       } catch (err) {
-        console.warn('Network unstable. Storing safely offline:', err.message);
+        console.warn('Cloud post failed, saving locally:', err.message);
       }
     }
 
-    // Offline / Fallback handling
-    await saveOfflineEntry(memoryPayload, currentFile);
-    await refreshOfflineEntries();
+    // Offline Mode (Safe local storage backup)
+    const currentOffline = JSON.parse(localStorage.getItem('viva_offline_notes') || '[]');
+    currentOffline.unshift(memoryItem);
+    localStorage.setItem('viva_offline_notes', JSON.stringify(currentOffline));
+    setOfflineEntries(currentOffline);
+
+    setTitle('');
+    setContent('');
+    setFile(null);
+    setPreviewUrl(null);
     setLoading(false);
   };
 
@@ -215,39 +206,53 @@ export default function Dashboard({ themeConfig }) {
       await axios.delete(`${API_BASE}/api/entries/${id}`, {
         headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
       });
-      setEntries(entries.filter((entry) => entry._id !== id));
+      setEntries(entries.filter(entry => entry._id !== id));
       setSelectedEntry(null);
     } catch (err) {
       console.error(err);
     }
   };
 
+  const handleLogout = () => {
+    localStorage.removeItem('token');
+    window.location.reload();
+  };
+
   return (
     <div className="max-w-4xl mx-auto p-4 md:p-6 space-y-8">
-      {!isOnline && (
-        <div className="flex items-center gap-2 p-3 bg-amber-500/10 border border-amber-400 text-amber-700 dark:text-amber-300 rounded-2xl text-xs font-bold">
-          <WifiOff className="w-4 h-4 shrink-0" />
-          <span>Offline Mode. Memories are saved locally on your phone and will sync when online.</span>
+      {/* Top Bar / Status */}
+      <div className="flex justify-between items-center bg-black/5 dark:bg-white/5 p-3 rounded-2xl">
+        <div className="flex items-center gap-2 text-xs font-bold">
+          <span className={`w-2.5 h-2.5 rounded-full ${isOnline ? 'bg-emerald-500' : 'bg-amber-500'}`} />
+          <span>{isOnline ? 'Cloud Connected' : 'Offline Mode'}</span>
         </div>
-      )}
+        <button
+          onClick={handleLogout}
+          className="flex items-center gap-1 text-xs font-bold text-rose-500 hover:text-rose-600 cursor-pointer"
+        >
+          <LogOut className="w-3.5 h-3.5" /> Logout
+        </button>
+      </div>
 
-      {isOnline && offlineList.length > 0 && (
+      {/* Sync Warning Banner */}
+      {isOnline && offlineEntries.length > 0 && (
         <div className="flex items-center justify-between p-3 bg-emerald-500/10 border border-emerald-400 text-emerald-700 dark:text-emerald-300 rounded-2xl text-xs font-bold">
           <div className="flex items-center gap-2">
             <RefreshCw className={`w-4 h-4 shrink-0 ${syncing ? 'animate-spin' : ''}`} />
-            <span>{offlineList.length} offline note(s) ready to sync.</span>
+            <span>{offlineEntries.length} memory saved offline.</span>
           </div>
           <button
             type="button"
             onClick={syncOfflineEntries}
             disabled={syncing}
-            className="px-3 py-1 bg-emerald-600 text-white rounded-xl text-xs font-bold cursor-pointer disabled:opacity-50 hover:bg-emerald-700 transition"
+            className="px-3 py-1 bg-emerald-600 text-white rounded-xl text-xs font-bold cursor-pointer disabled:opacity-50"
           >
             {syncing ? 'Syncing...' : 'Sync Now'}
           </button>
         </div>
       )}
 
+      {/* New Memory Box */}
       <div className={`border-2 rounded-[2rem] p-6 shadow-sm transition-all ${themeConfig.cardBg} ${themeConfig.borderColor}`}>
         <div className="flex items-center gap-2 mb-4">
           <Sparkles className="w-5 h-5 opacity-75" />
@@ -356,19 +361,20 @@ export default function Dashboard({ themeConfig }) {
               disabled={loading}
               className={`font-bold px-6 py-2 rounded-full text-sm shadow-md transition transform active:scale-95 disabled:opacity-50 cursor-pointer ${themeConfig.buttonPrimary}`}
             >
-              {loading ? 'Saving...' : `Save Memory ${themeConfig.icon}`}
+              {loading ? 'Saving Memory...' : `Save Memory ${themeConfig.icon}`}
             </button>
           </div>
         </form>
       </div>
 
-      {offlineList.length > 0 && (
+      {/* Offline Pending Cards */}
+      {offlineEntries.length > 0 && (
         <div className="space-y-3">
           <h4 className="text-xs font-black uppercase tracking-wider text-amber-600 flex items-center gap-1">
-            <WifiOff className="w-3.5 h-3.5" /> Saved Offline on this phone ({offlineList.length})
+            <WifiOff className="w-3.5 h-3.5" /> Stored On Phone (Waiting to Sync)
           </h4>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-3 opacity-80">
-            {offlineList.map((item) => (
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            {offlineEntries.map((item) => (
               <div key={item.id} className="border border-dashed border-amber-400 rounded-2xl p-3 bg-amber-50/40 flex items-center justify-between">
                 <div className="flex items-center gap-2">
                   <span className="text-xl">{item.moodEmoji}</span>
@@ -383,6 +389,7 @@ export default function Dashboard({ themeConfig }) {
         </div>
       )}
 
+      {/* Cloud Timeline Header */}
       <div className="flex justify-between items-center">
         <h3 className={`font-black text-lg flex items-center gap-2 ${themeConfig.primaryText}`}>
           <span>Memories Timeline</span>
@@ -390,6 +397,7 @@ export default function Dashboard({ themeConfig }) {
         </h3>
       </div>
 
+      {/* Entries List */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         {entries.map((entry) => (
           <div
@@ -436,6 +444,7 @@ export default function Dashboard({ themeConfig }) {
         ))}
       </div>
 
+      {/* Modal */}
       {selectedEntry && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
           <div className={`w-full max-w-lg border-2 rounded-[2rem] p-6 shadow-2xl space-y-4 max-h-[90vh] overflow-y-auto ${themeConfig.cardBg} ${themeConfig.borderColor}`}>
