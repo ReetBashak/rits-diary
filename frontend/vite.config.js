@@ -32,6 +32,8 @@ export default defineConfig({
         ]
       },
       workbox: {
+        cacheId: 'viva-la-vida-v2',
+        cleanupOutdatedCaches: true,
         globPatterns: ['**/*.{js,css,html,ico,png,svg,webp}']
       }
     })
