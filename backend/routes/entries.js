@@ -21,31 +21,27 @@ const storage = new CloudinaryStorage({
   }
 });
 
-const upload = multer({
-  storage: storage,
-  limits: { fileSize: 10 * 1024 * 1024 }
-});
+const upload = multer({ storage: storage });
 
-// 1. Get All Entries
+// 1. Get All Entries (Supports old + new memories)
 router.get('/', auth, async (req, res) => {
   try {
     const entries = await Entry.find({ userId: req.user.id }).sort({ createdAt: -1 });
     res.json(entries);
   } catch (err) {
-    console.error('Fetch entries error:', err);
     res.status(500).json({ error: err.message });
   }
 });
 
-// 2. Create Entry (Supports both Multipart & JSON safely)
+// 2. Create Entry
 router.post('/', auth, upload.single('media'), async (req, res) => {
   try {
     const { title, content, moodEmoji } = req.body;
-    let mediaUrl = req.body.mediaUrl || null;
-    let mediaType = req.body.mediaType || 'none';
+    let mediaUrl = null;
+    let mediaType = 'none';
 
     if (req.file) {
-      mediaUrl = req.file.path || req.file.secure_url || req.file.url;
+      mediaUrl = req.file.path || req.file.secure_url;
       const mime = req.file.mimetype || '';
 
       if (mime.startsWith('video/') || (mediaUrl && mediaUrl.match(/\.(mp4|mov|webm)$/i))) {
@@ -69,7 +65,6 @@ router.post('/', auth, upload.single('media'), async (req, res) => {
     const savedEntry = await newEntry.save();
     res.status(201).json(savedEntry);
   } catch (err) {
-    console.error('Save entry route error:', err);
     res.status(500).json({ error: err.message });
   }
 });
