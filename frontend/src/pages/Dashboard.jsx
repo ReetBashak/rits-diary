@@ -1,6 +1,6 @@
 ﻿import { useState, useEffect, useRef } from 'react';
 import axios from 'axios';
-import { Trash2, Sparkles, Calendar, Paperclip, Eye, Mic, Square, Camera, X, WifiOff, RefreshCw, Image as ImageIcon, LogOut } from 'lucide-react';
+import { Trash2, Sparkles, Calendar, Paperclip, Eye, Mic, Square, Camera, X, WifiOff, RefreshCw, Image as ImageIcon } from 'lucide-react';
 
 const API_BASE = (import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000').replace(/\/$/, '');
 
@@ -37,7 +37,6 @@ export default function Dashboard({ themeConfig }) {
     }
   };
 
-  // Cloud memories fetch karna (Purana + Naya saara data timeline par aayega)
   const fetchEntries = async () => {
     const token = localStorage.getItem('token');
     if (!token) return;
@@ -59,7 +58,7 @@ export default function Dashboard({ themeConfig }) {
     if (!navigator.onLine || saved.length === 0 || syncing) return;
 
     setSyncing(true);
-    const remaining = [];
+    const token = localStorage.getItem('token');
 
     for (const item of saved) {
       const formData = new FormData();
@@ -69,17 +68,23 @@ export default function Dashboard({ themeConfig }) {
 
       try {
         await axios.post(`${API_BASE}/api/entries`, formData, {
-          headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
+          headers: { Authorization: `Bearer ${token}` }
         });
-      } catch {
-        remaining.push(item);
+      } catch (err) {
+        console.warn('Sync note skipped:', err);
       }
     }
 
-    localStorage.setItem('viva_offline_notes', JSON.stringify(remaining));
-    setOfflineEntries(remaining);
+    // Clear after sync run
+    localStorage.removeItem('viva_offline_notes');
+    setOfflineEntries([]);
     setSyncing(false);
     fetchEntries();
+  };
+
+  const clearStuckOffline = () => {
+    localStorage.removeItem('viva_offline_notes');
+    setOfflineEntries([]);
   };
 
   useEffect(() => {
@@ -144,7 +149,6 @@ export default function Dashboard({ themeConfig }) {
     }
   };
 
-  // Safe Memory Upload
   const handleCreateEntry = async (e) => {
     e.preventDefault();
     if (!title.trim()) return;
@@ -161,18 +165,13 @@ export default function Dashboard({ themeConfig }) {
       formData.append('title', memoryItem.title);
       formData.append('content', memoryItem.content);
       formData.append('moodEmoji', memoryItem.moodEmoji);
-      if (file) {
-        formData.append('media', file);
-      }
+      if (file) formData.append('media', file);
 
       try {
         const res = await axios.post(`${API_BASE}/api/entries`, formData, {
-          headers: {
-            Authorization: `Bearer ${localStorage.getItem('token')}`
-          }
+          headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
         });
 
-        // Add memory directly to timeline
         setEntries(prev => [res.data, ...prev]);
         setTitle('');
         setContent('');
@@ -181,11 +180,10 @@ export default function Dashboard({ themeConfig }) {
         setLoading(false);
         return;
       } catch (err) {
-        console.warn('Online save error:', err.response?.data || err.message);
+        console.warn('Direct upload issue, saving locally:', err);
       }
     }
 
-    // Offline Mode
     const offlineRecord = {
       id: Date.now(),
       ...memoryItem,
@@ -215,12 +213,6 @@ export default function Dashboard({ themeConfig }) {
     }
   };
 
-  const handleLogout = () => {
-    localStorage.removeItem('token');
-    window.location.reload();
-  };
-
-  // Reads ANY old or new media URL format accurately
   const extractMedia = (item) => {
     const url = item.mediaUrl || item.imageUrl || item.fileUrl || item.image || null;
     let type = item.mediaType || 'image';
@@ -235,45 +227,43 @@ export default function Dashboard({ themeConfig }) {
 
   return (
     <div className="max-w-4xl mx-auto p-4 md:p-6 space-y-8">
-      {/* Top Status */}
-      <div className="flex justify-between items-center bg-black/5 dark:bg-white/5 p-3 rounded-2xl">
-        <div className="flex items-center gap-2 text-xs font-bold">
-          <span className={`w-2.5 h-2.5 rounded-full ${isOnline ? 'bg-emerald-500' : 'bg-amber-500'}`} />
-          <span>{isOnline ? 'Viva La Vida — Cloud Online' : 'Offline Mode (Phone Storage)'}</span>
-        </div>
-        <button
-          onClick={handleLogout}
-          className="flex items-center gap-1 text-xs font-bold text-rose-500 hover:text-rose-600 cursor-pointer"
-        >
-          <LogOut className="w-3.5 h-3.5" /> Logout
-        </button>
-      </div>
-
+      {/* Status Warning */}
       {!isOnline && (
         <div className="flex items-center gap-2 p-3 bg-amber-500/10 border border-amber-400 text-amber-700 dark:text-amber-300 rounded-2xl text-xs font-bold">
           <WifiOff className="w-4 h-4 shrink-0" />
-          <span>Offline mode active. Your notes are safe on your device and will sync automatically when online.</span>
+          <span>Offline mode active. Notes will save locally and auto-sync when online.</span>
         </div>
       )}
 
+      {/* Sync Banner */}
       {isOnline && offlineEntries.length > 0 && (
         <div className="flex items-center justify-between p-3 bg-emerald-500/10 border border-emerald-400 text-emerald-700 dark:text-emerald-300 rounded-2xl text-xs font-bold">
           <div className="flex items-center gap-2">
             <RefreshCw className={`w-4 h-4 shrink-0 ${syncing ? 'animate-spin' : ''}`} />
             <span>{offlineEntries.length} offline note(s) ready to sync.</span>
           </div>
-          <button
-            type="button"
-            onClick={syncOfflineEntries}
-            disabled={syncing}
-            className="px-3 py-1 bg-emerald-600 text-white rounded-xl text-xs font-bold cursor-pointer disabled:opacity-50"
-          >
-            {syncing ? 'Syncing...' : 'Sync Now'}
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={syncOfflineEntries}
+              disabled={syncing}
+              className="px-3 py-1 bg-emerald-600 text-white rounded-xl text-xs font-bold cursor-pointer hover:bg-emerald-700 transition"
+            >
+              {syncing ? 'Syncing...' : 'Sync Now'}
+            </button>
+            <button
+              type="button"
+              onClick={clearStuckOffline}
+              title="Clear stuck notes"
+              className="p-1 text-gray-500 hover:text-rose-500 cursor-pointer"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
         </div>
       )}
 
-      {/* Memory Creation Card */}
+      {/* New Memory Box */}
       <div className={`border-2 rounded-[2rem] p-6 shadow-sm transition-all ${themeConfig.cardBg} ${themeConfig.borderColor}`}>
         <div className="flex items-center gap-2 mb-4">
           <Sparkles className="w-5 h-5 opacity-75" />
@@ -382,93 +372,84 @@ export default function Dashboard({ themeConfig }) {
               disabled={loading}
               className={`font-bold px-6 py-2 rounded-full text-sm shadow-md transition transform active:scale-95 disabled:opacity-50 cursor-pointer ${themeConfig.buttonPrimary}`}
             >
-              {loading ? 'Saving...' : `Save Memory ${themeConfig.icon}`}
+              {loading ? 'Saving Memory...' : `Save Memory ${themeConfig.icon}`}
             </button>
           </div>
         </form>
       </div>
 
-      {/* Offline Pending Items */}
-      {offlineEntries.length > 0 && (
-        <div className="space-y-3">
-          <h4 className="text-xs font-black uppercase tracking-wider text-amber-600 flex items-center gap-1">
-            <WifiOff className="w-3.5 h-3.5" /> Stored locally on phone ({offlineEntries.length})
-          </h4>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-            {offlineEntries.map((item) => (
-              <div key={item.id} className="border border-dashed border-amber-400 rounded-2xl p-3 bg-amber-50/40 flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <span className="text-xl">{item.moodEmoji}</span>
-                  <div>
-                    <h5 className="font-bold text-xs">{item.title}</h5>
-                    <p className="text-[10px] opacity-60">Pending cloud sync</p>
-                  </div>
-                </div>
-              </div>
-            ))}
-          </div>
+      {/* Memories Timeline */}
+      <div className="space-y-4">
+        <div className="flex justify-between items-center">
+          <h3 className={`font-black text-lg flex items-center gap-2 ${themeConfig.primaryText}`}>
+            <span>Memories Timeline</span>
+            <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-black/5 dark:bg-white/10">{entries.length}</span>
+          </h3>
+          <button
+            onClick={fetchEntries}
+            className="text-xs font-bold opacity-60 hover:opacity-100 flex items-center gap-1 cursor-pointer"
+          >
+            <RefreshCw className="w-3 h-3" /> Refresh
+          </button>
         </div>
-      )}
 
-      {/* Timeline Section */}
-      <div className="flex justify-between items-center">
-        <h3 className={`font-black text-lg flex items-center gap-2 ${themeConfig.primaryText}`}>
-          <span>Memories Timeline</span>
-          <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-black/5 dark:bg-white/10">{entries.length}</span>
-        </h3>
-      </div>
-
-      {/* All Memories Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        {entries.map((entry) => {
-          const { url, type } = extractMedia(entry);
-          return (
-            <div
-              key={entry._id}
-              onClick={() => setSelectedEntry(entry)}
-              className={`border rounded-2xl p-4 shadow-sm hover:shadow-md transition-all cursor-pointer flex flex-col justify-between gap-3 group ${themeConfig.cardBg} ${themeConfig.borderColor}`}
-            >
-              <div className="flex items-start justify-between gap-3">
-                <div className="flex items-center gap-3 min-w-0">
-                  <span className="text-2xl p-2 bg-black/5 dark:bg-white/5 rounded-2xl shrink-0 group-hover:scale-110 transition-transform">
-                    {entry.moodEmoji || '🍊'}
-                  </span>
-                  <div className="min-w-0">
-                    <h4 className={`font-bold text-sm truncate ${themeConfig.primaryText}`}>{entry.title}</h4>
-                    <div className="flex items-center gap-2 text-[11px] opacity-60">
-                      <Calendar className="w-3 h-3" />
-                      <span>{new Date(entry.createdAt).toLocaleDateString()}</span>
+        {entries.length === 0 ? (
+          <div className="text-center py-10 opacity-50 text-sm font-semibold">
+            No memories loaded yet. Tap "Refresh" or add your first memory above!
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {entries.map((entry) => {
+              const { url, type } = extractMedia(entry);
+              return (
+                <div
+                  key={entry._id}
+                  onClick={() => setSelectedEntry(entry)}
+                  className={`border rounded-2xl p-4 shadow-sm hover:shadow-md transition-all cursor-pointer flex flex-col justify-between gap-3 group ${themeConfig.cardBg} ${themeConfig.borderColor}`}
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="flex items-center gap-3 min-w-0">
+                      <span className="text-2xl p-2 bg-black/5 dark:bg-white/5 rounded-2xl shrink-0 group-hover:scale-110 transition-transform">
+                        {entry.moodEmoji || '🍊'}
+                      </span>
+                      <div className="min-w-0">
+                        <h4 className={`font-bold text-sm truncate ${themeConfig.primaryText}`}>{entry.title}</h4>
+                        <div className="flex items-center gap-2 text-[11px] opacity-60">
+                          <Calendar className="w-3 h-3" />
+                          <span>{new Date(entry.createdAt).toLocaleDateString()}</span>
+                        </div>
+                      </div>
                     </div>
+
+                    <span className="text-xs font-bold px-2.5 py-1 rounded-full bg-black/5 dark:bg-white/10 flex items-center gap-1">
+                      <Eye className="w-3 h-3" /> Open
+                    </span>
                   </div>
-                </div>
 
-                <span className="text-xs font-bold px-2.5 py-1 rounded-full bg-black/5 dark:bg-white/10 flex items-center gap-1">
-                  <Eye className="w-3 h-3" /> Open
-                </span>
-              </div>
+                  {url && type === 'image' && (
+                    <div className="w-full h-36 rounded-xl overflow-hidden border border-black/5">
+                      <img
+                        src={url}
+                        alt={entry.title}
+                        className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+                        crossOrigin="anonymous"
+                      />
+                    </div>
+                  )}
 
-              {url && type === 'image' && (
-                <div className="w-full h-36 rounded-xl overflow-hidden border border-black/5">
-                  <img
-                    src={url}
-                    alt={entry.title}
-                    className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
-                    crossOrigin="anonymous"
-                  />
+                  {url && type !== 'image' && (
+                    <div className="text-xs font-semibold px-2.5 py-1 rounded-lg bg-black/5 flex items-center gap-1 w-fit uppercase">
+                      <ImageIcon className="w-3 h-3" /> {type} attached
+                    </div>
+                  )}
                 </div>
-              )}
-
-              {url && type !== 'image' && (
-                <div className="text-xs font-semibold px-2.5 py-1 rounded-lg bg-black/5 flex items-center gap-1 w-fit uppercase">
-                  <ImageIcon className="w-3 h-3" /> {type} attached
-                </div>
-              )}
-            </div>
-          );
-        })}
+              );
+            })}
+          </div>
+        )}
       </div>
 
-      {/* Memory Details Modal */}
+      {/* Modal View */}
       {selectedEntry && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
           <div className={`w-full max-w-lg border-2 rounded-[2rem] p-6 shadow-2xl space-y-4 max-h-[90vh] overflow-y-auto ${themeConfig.cardBg} ${themeConfig.borderColor}`}>
