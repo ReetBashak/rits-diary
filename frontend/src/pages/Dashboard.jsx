@@ -2,7 +2,7 @@
 import axios from 'axios';
 import { Trash2, Sparkles, Calendar, Paperclip, Eye, Mic, Square, Camera, X, WifiOff, RefreshCw, Image as ImageIcon } from 'lucide-react';
 
-const API_BASE = (import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000').replace(/\/$/, '');
+const API_BASE = 'https://rits-diary-backend.vercel.app';
 
 const STICKER_CATEGORIES = {
   Moods: ['🍊', '🍓', '🍰', '🧸', '☁️', '🥑', '🍭', '🎨'],
@@ -21,7 +21,6 @@ export default function Dashboard({ themeConfig }) {
   const [file, setFile] = useState(null);
   const [previewUrl, setPreviewUrl] = useState(null);
   const [loading, setLoading] = useState(false);
-  const [syncing, setSyncing] = useState(false);
   const [selectedEntry, setSelectedEntry] = useState(null);
 
   const [isRecording, setIsRecording] = useState(false);
@@ -37,6 +36,7 @@ export default function Dashboard({ themeConfig }) {
     }
   };
 
+  // 1. Direct fetch from backend
   const fetchEntries = async () => {
     const token = localStorage.getItem('token');
     if (!token) return;
@@ -53,13 +53,12 @@ export default function Dashboard({ themeConfig }) {
     }
   };
 
+  // Sync offline notes only when back online
   const syncOfflineEntries = async () => {
     const saved = JSON.parse(localStorage.getItem('viva_offline_notes') || '[]');
-    if (!navigator.onLine || saved.length === 0 || syncing) return;
+    if (!navigator.onLine || saved.length === 0) return;
 
-    setSyncing(true);
     const token = localStorage.getItem('token');
-
     for (const item of saved) {
       const formData = new FormData();
       formData.append('title', item.title);
@@ -71,20 +70,13 @@ export default function Dashboard({ themeConfig }) {
           headers: { Authorization: `Bearer ${token}` }
         });
       } catch (err) {
-        console.warn('Sync note skipped:', err);
+        console.warn('Sync note error:', err);
       }
     }
 
-    // Clear after sync run
     localStorage.removeItem('viva_offline_notes');
     setOfflineEntries([]);
-    setSyncing(false);
     fetchEntries();
-  };
-
-  const clearStuckOffline = () => {
-    localStorage.removeItem('viva_offline_notes');
-    setOfflineEntries([]);
   };
 
   useEffect(() => {
@@ -149,22 +141,18 @@ export default function Dashboard({ themeConfig }) {
     }
   };
 
+  // 2. Direct Online / Offline Creation
   const handleCreateEntry = async (e) => {
     e.preventDefault();
     if (!title.trim()) return;
     setLoading(true);
 
-    const memoryItem = {
-      title: title.trim(),
-      content: content.trim(),
-      moodEmoji
-    };
-
+    // Online Hai Toh Seedha Live Save Hoga (Pehle ki tarah)
     if (navigator.onLine) {
       const formData = new FormData();
-      formData.append('title', memoryItem.title);
-      formData.append('content', memoryItem.content);
-      formData.append('moodEmoji', memoryItem.moodEmoji);
+      formData.append('title', title.trim());
+      formData.append('content', content.trim());
+      formData.append('moodEmoji', moodEmoji);
       if (file) formData.append('media', file);
 
       try {
@@ -180,17 +168,21 @@ export default function Dashboard({ themeConfig }) {
         setLoading(false);
         return;
       } catch (err) {
-        console.warn('Direct upload issue, saving locally:', err);
+        console.error('Online upload error:', err);
       }
     }
 
-    const offlineRecord = {
+    // Agar Net Bilkul Band Hai Tabhi Phone Mein Save Hoga
+    const offlineItem = {
       id: Date.now(),
-      ...memoryItem,
+      title: title.trim(),
+      content: content.trim(),
+      moodEmoji,
       createdAt: new Date().toISOString()
     };
+
     const currentOffline = JSON.parse(localStorage.getItem('viva_offline_notes') || '[]');
-    currentOffline.unshift(offlineRecord);
+    currentOffline.unshift(offlineItem);
     localStorage.setItem('viva_offline_notes', JSON.stringify(currentOffline));
     setOfflineEntries(currentOffline);
 
@@ -227,11 +219,11 @@ export default function Dashboard({ themeConfig }) {
 
   return (
     <div className="max-w-4xl mx-auto p-4 md:p-6 space-y-8">
-      {/* Status Warning */}
+      {/* Offline Alert Only When Network Is Off */}
       {!isOnline && (
         <div className="flex items-center gap-2 p-3 bg-amber-500/10 border border-amber-400 text-amber-700 dark:text-amber-300 rounded-2xl text-xs font-bold">
           <WifiOff className="w-4 h-4 shrink-0" />
-          <span>Offline mode active. Notes will save locally and auto-sync when online.</span>
+          <span>No Internet. Note will save on phone and upload automatically when internet reconnects.</span>
         </div>
       )}
 
@@ -239,22 +231,20 @@ export default function Dashboard({ themeConfig }) {
       {isOnline && offlineEntries.length > 0 && (
         <div className="flex items-center justify-between p-3 bg-emerald-500/10 border border-emerald-400 text-emerald-700 dark:text-emerald-300 rounded-2xl text-xs font-bold">
           <div className="flex items-center gap-2">
-            <RefreshCw className={`w-4 h-4 shrink-0 ${syncing ? 'animate-spin' : ''}`} />
-            <span>{offlineEntries.length} offline note(s) ready to sync.</span>
+            <RefreshCw className="w-4 h-4 shrink-0 animate-spin" />
+            <span>{offlineEntries.length} offline note(s) saved during disconnected state.</span>
           </div>
           <div className="flex items-center gap-2">
             <button
               type="button"
               onClick={syncOfflineEntries}
-              disabled={syncing}
-              className="px-3 py-1 bg-emerald-600 text-white rounded-xl text-xs font-bold cursor-pointer hover:bg-emerald-700 transition"
+              className="px-3 py-1 bg-emerald-600 text-white rounded-xl text-xs font-bold cursor-pointer hover:bg-emerald-700"
             >
-              {syncing ? 'Syncing...' : 'Sync Now'}
+              Upload Now
             </button>
             <button
               type="button"
-              onClick={clearStuckOffline}
-              title="Clear stuck notes"
+              onClick={() => { localStorage.removeItem('viva_offline_notes'); setOfflineEntries([]); }}
               className="p-1 text-gray-500 hover:text-rose-500 cursor-pointer"
             >
               <X className="w-4 h-4" />
@@ -372,13 +362,13 @@ export default function Dashboard({ themeConfig }) {
               disabled={loading}
               className={`font-bold px-6 py-2 rounded-full text-sm shadow-md transition transform active:scale-95 disabled:opacity-50 cursor-pointer ${themeConfig.buttonPrimary}`}
             >
-              {loading ? 'Saving Memory...' : `Save Memory ${themeConfig.icon}`}
+              {loading ? 'Saving...' : `Save Memory ${themeConfig.icon}`}
             </button>
           </div>
         </form>
       </div>
 
-      {/* Memories Timeline */}
+      {/* Cloud Timeline */}
       <div className="space-y-4">
         <div className="flex justify-between items-center">
           <h3 className={`font-black text-lg flex items-center gap-2 ${themeConfig.primaryText}`}>
@@ -393,60 +383,54 @@ export default function Dashboard({ themeConfig }) {
           </button>
         </div>
 
-        {entries.length === 0 ? (
-          <div className="text-center py-10 opacity-50 text-sm font-semibold">
-            No memories loaded yet. Tap "Refresh" or add your first memory above!
-          </div>
-        ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {entries.map((entry) => {
-              const { url, type } = extractMedia(entry);
-              return (
-                <div
-                  key={entry._id}
-                  onClick={() => setSelectedEntry(entry)}
-                  className={`border rounded-2xl p-4 shadow-sm hover:shadow-md transition-all cursor-pointer flex flex-col justify-between gap-3 group ${themeConfig.cardBg} ${themeConfig.borderColor}`}
-                >
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="flex items-center gap-3 min-w-0">
-                      <span className="text-2xl p-2 bg-black/5 dark:bg-white/5 rounded-2xl shrink-0 group-hover:scale-110 transition-transform">
-                        {entry.moodEmoji || '🍊'}
-                      </span>
-                      <div className="min-w-0">
-                        <h4 className={`font-bold text-sm truncate ${themeConfig.primaryText}`}>{entry.title}</h4>
-                        <div className="flex items-center gap-2 text-[11px] opacity-60">
-                          <Calendar className="w-3 h-3" />
-                          <span>{new Date(entry.createdAt).toLocaleDateString()}</span>
-                        </div>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          {entries.map((entry) => {
+            const { url, type } = extractMedia(entry);
+            return (
+              <div
+                key={entry._id}
+                onClick={() => setSelectedEntry(entry)}
+                className={`border rounded-2xl p-4 shadow-sm hover:shadow-md transition-all cursor-pointer flex flex-col justify-between gap-3 group ${themeConfig.cardBg} ${themeConfig.borderColor}`}
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <div className="flex items-center gap-3 min-w-0">
+                    <span className="text-2xl p-2 bg-black/5 dark:bg-white/5 rounded-2xl shrink-0 group-hover:scale-110 transition-transform">
+                      {entry.moodEmoji || '🍊'}
+                    </span>
+                    <div className="min-w-0">
+                      <h4 className={`font-bold text-sm truncate ${themeConfig.primaryText}`}>{entry.title}</h4>
+                      <div className="flex items-center gap-2 text-[11px] opacity-60">
+                        <Calendar className="w-3 h-3" />
+                        <span>{new Date(entry.createdAt).toLocaleDateString()}</span>
                       </div>
                     </div>
-
-                    <span className="text-xs font-bold px-2.5 py-1 rounded-full bg-black/5 dark:bg-white/10 flex items-center gap-1">
-                      <Eye className="w-3 h-3" /> Open
-                    </span>
                   </div>
 
-                  {url && type === 'image' && (
-                    <div className="w-full h-36 rounded-xl overflow-hidden border border-black/5">
-                      <img
-                        src={url}
-                        alt={entry.title}
-                        className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
-                        crossOrigin="anonymous"
-                      />
-                    </div>
-                  )}
-
-                  {url && type !== 'image' && (
-                    <div className="text-xs font-semibold px-2.5 py-1 rounded-lg bg-black/5 flex items-center gap-1 w-fit uppercase">
-                      <ImageIcon className="w-3 h-3" /> {type} attached
-                    </div>
-                  )}
+                  <span className="text-xs font-bold px-2.5 py-1 rounded-full bg-black/5 dark:bg-white/10 flex items-center gap-1">
+                    <Eye className="w-3 h-3" /> Open
+                  </span>
                 </div>
-              );
-            })}
-          </div>
-        )}
+
+                {url && type === 'image' && (
+                  <div className="w-full h-36 rounded-xl overflow-hidden border border-black/5">
+                    <img
+                      src={url}
+                      alt={entry.title}
+                      className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+                      crossOrigin="anonymous"
+                    />
+                  </div>
+                )}
+
+                {url && type !== 'image' && (
+                  <div className="text-xs font-semibold px-2.5 py-1 rounded-lg bg-black/5 flex items-center gap-1 w-fit uppercase">
+                    <ImageIcon className="w-3 h-3" /> {type} attached
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
       </div>
 
       {/* Modal View */}

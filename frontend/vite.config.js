@@ -9,6 +9,7 @@ export default defineConfig({
     tailwindcss(),
     VitePWA({
       registerType: 'autoUpdate',
+      injectRegister: 'auto',
       manifest: {
         name: 'Viva La Vida — Tangerine Diary',
         short_name: 'Viva La Vida',
@@ -29,6 +30,11 @@ export default defineConfig({
             type: 'image/png'
           }
         ]
+      },
+      workbox: {
+        // Yeh line ensure karegi ki online hone par API calls ko SW chhue bhi na
+        navigateFallbackDenylist: [/^\/api/, /^https:\/\/rits-diary-backend\.vercel\.app/],
+        runtimeCaching: []
       }
     })
   ]
