@@ -28,7 +28,6 @@ export default function Dashboard({ themeConfig }) {
   const mediaRecorderRef = useRef(null);
   const audioChunksRef = useRef([]);
 
-  // Load offline notes from localStorage
   const loadOfflineNotes = () => {
     try {
       const saved = JSON.parse(localStorage.getItem('viva_offline_notes') || '[]');
@@ -38,7 +37,7 @@ export default function Dashboard({ themeConfig }) {
     }
   };
 
-  // Fetch online cloud entries
+  // Cloud memories fetch karna (Purana + Naya saara data timeline par aayega)
   const fetchEntries = async () => {
     const token = localStorage.getItem('token');
     if (!token) return;
@@ -51,11 +50,10 @@ export default function Dashboard({ themeConfig }) {
         setEntries(res.data);
       }
     } catch (err) {
-      console.error('Fetch entries error:', err);
+      console.error('Fetch entries failed:', err);
     }
   };
 
-  // Sync offline notes when online
   const syncOfflineEntries = async () => {
     const saved = JSON.parse(localStorage.getItem('viva_offline_notes') || '[]');
     if (!navigator.onLine || saved.length === 0 || syncing) return;
@@ -66,8 +64,8 @@ export default function Dashboard({ themeConfig }) {
     for (const item of saved) {
       const formData = new FormData();
       formData.append('title', item.title);
-      formData.append('content', item.content);
-      formData.append('moodEmoji', item.moodEmoji);
+      formData.append('content', item.content || '');
+      formData.append('moodEmoji', item.moodEmoji || '🍊');
 
       try {
         await axios.post(`${API_BASE}/api/entries`, formData, {
@@ -127,7 +125,7 @@ export default function Dashboard({ themeConfig }) {
 
       mediaRecorderRef.current.onstop = () => {
         const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
-        const recordedAudioFile = new File([audioBlob], `voice-memory-${Date.now()}.webm`, { type: 'audio/webm' });
+        const recordedAudioFile = new File([audioBlob], `voice-${Date.now()}.webm`, { type: 'audio/webm' });
         setFile(recordedAudioFile);
         setIsRecording(false);
       };
@@ -146,24 +144,35 @@ export default function Dashboard({ themeConfig }) {
     }
   };
 
+  // Safe Memory Upload
   const handleCreateEntry = async (e) => {
     e.preventDefault();
     if (!title.trim()) return;
     setLoading(true);
 
-    // 1. If Online -> Direct Live Upload
+    const memoryItem = {
+      title: title.trim(),
+      content: content.trim(),
+      moodEmoji
+    };
+
     if (navigator.onLine) {
       const formData = new FormData();
-      formData.append('title', title.trim());
-      formData.append('content', content.trim());
-      formData.append('moodEmoji', moodEmoji);
-      if (file) formData.append('media', file);
+      formData.append('title', memoryItem.title);
+      formData.append('content', memoryItem.content);
+      formData.append('moodEmoji', memoryItem.moodEmoji);
+      if (file) {
+        formData.append('media', file);
+      }
 
       try {
         const res = await axios.post(`${API_BASE}/api/entries`, formData, {
-          headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
+          headers: {
+            Authorization: `Bearer ${localStorage.getItem('token')}`
+          }
         });
 
+        // Add memory directly to timeline
         setEntries(prev => [res.data, ...prev]);
         setTitle('');
         setContent('');
@@ -172,21 +181,18 @@ export default function Dashboard({ themeConfig }) {
         setLoading(false);
         return;
       } catch (err) {
-        console.warn('Live upload failed, storing offline backup:', err);
+        console.warn('Online save error:', err.response?.data || err.message);
       }
     }
 
-    // 2. If Offline -> Save text locally
-    const memoryItem = {
+    // Offline Mode
+    const offlineRecord = {
       id: Date.now(),
-      title: title.trim(),
-      content: content.trim(),
-      moodEmoji,
+      ...memoryItem,
       createdAt: new Date().toISOString()
     };
-
     const currentOffline = JSON.parse(localStorage.getItem('viva_offline_notes') || '[]');
-    currentOffline.unshift(memoryItem);
+    currentOffline.unshift(offlineRecord);
     localStorage.setItem('viva_offline_notes', JSON.stringify(currentOffline));
     setOfflineEntries(currentOffline);
 
@@ -214,14 +220,14 @@ export default function Dashboard({ themeConfig }) {
     window.location.reload();
   };
 
-  const getMediaInfo = (entry) => {
-    const url = entry.mediaUrl || entry.imageUrl || null;
-    let type = entry.mediaType || 'image';
+  // Reads ANY old or new media URL format accurately
+  const extractMedia = (item) => {
+    const url = item.mediaUrl || item.imageUrl || item.fileUrl || item.image || null;
+    let type = item.mediaType || 'image';
 
-    if (url && (url.includes('.mp4') || url.includes('.mov') || url.includes('.webm'))) {
-      type = 'video';
-    } else if (url && (url.includes('.mp3') || url.includes('.wav') || url.includes('.m4a') || url.includes('.ogg'))) {
-      type = 'audio';
+    if (url) {
+      if (url.match(/\.(mp4|mov|webm)$/i)) type = 'video';
+      else if (url.match(/\.(mp3|wav|m4a|ogg)$/i)) type = 'audio';
     }
 
     return { url, type };
@@ -229,11 +235,11 @@ export default function Dashboard({ themeConfig }) {
 
   return (
     <div className="max-w-4xl mx-auto p-4 md:p-6 space-y-8">
-      {/* Header bar */}
+      {/* Top Status */}
       <div className="flex justify-between items-center bg-black/5 dark:bg-white/5 p-3 rounded-2xl">
         <div className="flex items-center gap-2 text-xs font-bold">
           <span className={`w-2.5 h-2.5 rounded-full ${isOnline ? 'bg-emerald-500' : 'bg-amber-500'}`} />
-          <span>{isOnline ? 'Online (Cloud Active)' : 'Offline (Local Safe Mode)'}</span>
+          <span>{isOnline ? 'Viva La Vida — Cloud Online' : 'Offline Mode (Phone Storage)'}</span>
         </div>
         <button
           onClick={handleLogout}
@@ -243,20 +249,18 @@ export default function Dashboard({ themeConfig }) {
         </button>
       </div>
 
-      {/* Offline Alert */}
       {!isOnline && (
         <div className="flex items-center gap-2 p-3 bg-amber-500/10 border border-amber-400 text-amber-700 dark:text-amber-300 rounded-2xl text-xs font-bold">
           <WifiOff className="w-4 h-4 shrink-0" />
-          <span>Offline mode active. Text notes will save on your phone and auto-sync when internet reconnects.</span>
+          <span>Offline mode active. Your notes are safe on your device and will sync automatically when online.</span>
         </div>
       )}
 
-      {/* Sync Button */}
       {isOnline && offlineEntries.length > 0 && (
         <div className="flex items-center justify-between p-3 bg-emerald-500/10 border border-emerald-400 text-emerald-700 dark:text-emerald-300 rounded-2xl text-xs font-bold">
           <div className="flex items-center gap-2">
             <RefreshCw className={`w-4 h-4 shrink-0 ${syncing ? 'animate-spin' : ''}`} />
-            <span>{offlineEntries.length} offline note(s) ready to upload.</span>
+            <span>{offlineEntries.length} offline note(s) ready to sync.</span>
           </div>
           <button
             type="button"
@@ -269,7 +273,7 @@ export default function Dashboard({ themeConfig }) {
         </div>
       )}
 
-      {/* Create Memory Form */}
+      {/* Memory Creation Card */}
       <div className={`border-2 rounded-[2rem] p-6 shadow-sm transition-all ${themeConfig.cardBg} ${themeConfig.borderColor}`}>
         <div className="flex items-center gap-2 mb-4">
           <Sparkles className="w-5 h-5 opacity-75" />
@@ -378,7 +382,7 @@ export default function Dashboard({ themeConfig }) {
               disabled={loading}
               className={`font-bold px-6 py-2 rounded-full text-sm shadow-md transition transform active:scale-95 disabled:opacity-50 cursor-pointer ${themeConfig.buttonPrimary}`}
             >
-              {loading ? 'Saving Memory...' : `Save Memory ${themeConfig.icon}`}
+              {loading ? 'Saving...' : `Save Memory ${themeConfig.icon}`}
             </button>
           </div>
         </form>
@@ -406,7 +410,7 @@ export default function Dashboard({ themeConfig }) {
         </div>
       )}
 
-      {/* Cloud Timeline Header */}
+      {/* Timeline Section */}
       <div className="flex justify-between items-center">
         <h3 className={`font-black text-lg flex items-center gap-2 ${themeConfig.primaryText}`}>
           <span>Memories Timeline</span>
@@ -414,10 +418,10 @@ export default function Dashboard({ themeConfig }) {
         </h3>
       </div>
 
-      {/* Timeline Cards */}
+      {/* All Memories Cards */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         {entries.map((entry) => {
-          const { url, type } = getMediaInfo(entry);
+          const { url, type } = extractMedia(entry);
           return (
             <div
               key={entry._id}
@@ -464,7 +468,7 @@ export default function Dashboard({ themeConfig }) {
         })}
       </div>
 
-      {/* Entry Modal */}
+      {/* Memory Details Modal */}
       {selectedEntry && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
           <div className={`w-full max-w-lg border-2 rounded-[2rem] p-6 shadow-2xl space-y-4 max-h-[90vh] overflow-y-auto ${themeConfig.cardBg} ${themeConfig.borderColor}`}>
@@ -489,7 +493,7 @@ export default function Dashboard({ themeConfig }) {
               )}
 
               {(() => {
-                const { url, type } = getMediaInfo(selectedEntry);
+                const { url, type } = extractMedia(selectedEntry);
                 if (!url) return null;
                 return (
                   <div className="rounded-2xl overflow-hidden border border-black/10 bg-black/5">

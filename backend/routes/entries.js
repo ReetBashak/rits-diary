@@ -21,27 +21,43 @@ const storage = new CloudinaryStorage({
   }
 });
 
-const upload = multer({ storage: storage });
+const upload = multer({
+  storage: storage,
+  limits: { fileSize: 15 * 1024 * 1024 }
+});
 
-// 1. Get All Entries (Supports old + new memories)
+// 1. Fetch All User Entries (Clean sort by newest first)
 router.get('/', auth, async (req, res) => {
   try {
     const entries = await Entry.find({ userId: req.user.id }).sort({ createdAt: -1 });
-    res.json(entries);
+    res.status(200).json(entries);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    console.error('Fetch entries error:', err);
+    res.status(500).json({ error: 'Failed to fetch entries', details: err.message });
   }
 });
 
-// 2. Create Entry
-router.post('/', auth, upload.single('media'), async (req, res) => {
+// 2. Create Entry (Handles both Text-only AND Media seamlessly)
+router.post('/', auth, (req, res, next) => {
+  upload.single('media')(req, res, (err) => {
+    if (err) {
+      console.warn('Multer skipped or error:', err.message);
+    }
+    next();
+  });
+}, async (req, res) => {
   try {
     const { title, content, moodEmoji } = req.body;
+
+    if (!title || !title.trim()) {
+      return res.status(400).json({ error: 'Title is required' });
+    }
+
     let mediaUrl = null;
     let mediaType = 'none';
 
     if (req.file) {
-      mediaUrl = req.file.path || req.file.secure_url;
+      mediaUrl = req.file.path || req.file.secure_url || req.file.url;
       const mime = req.file.mimetype || '';
 
       if (mime.startsWith('video/') || (mediaUrl && mediaUrl.match(/\.(mp4|mov|webm)$/i))) {
@@ -55,17 +71,18 @@ router.post('/', auth, upload.single('media'), async (req, res) => {
 
     const newEntry = new Entry({
       userId: req.user.id,
-      title: title || 'Untitled Memory',
-      content: content || '',
+      title: title.trim(),
+      content: content ? content.trim() : '',
       moodEmoji: moodEmoji || '🍊',
       mediaUrl: mediaUrl,
       mediaType: mediaType
     });
 
     const savedEntry = await newEntry.save();
-    res.status(201).json(savedEntry);
+    return res.status(201).json(savedEntry);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    console.error('Save entry server error:', err);
+    return res.status(500).json({ error: 'Server error saving memory', details: err.message });
   }
 });
 
@@ -73,12 +90,14 @@ router.post('/', auth, upload.single('media'), async (req, res) => {
 router.delete('/:id', auth, async (req, res) => {
   try {
     const entry = await Entry.findOne({ _id: req.params.id, userId: req.user.id });
-    if (!entry) return res.status(404).json({ msg: 'Entry not found' });
+    if (!entry) {
+      return res.status(404).json({ error: 'Entry not found' });
+    }
 
     await Entry.findByIdAndDelete(req.params.id);
-    res.json({ msg: 'Entry deleted successfully' });
+    return res.json({ msg: 'Memory deleted successfully' });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    return res.status(500).json({ error: err.message });
   }
 });
 
