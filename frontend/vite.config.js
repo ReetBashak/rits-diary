@@ -30,10 +30,7 @@ export default defineConfig({
         ]
       },
       workbox: {
-        globPatterns: ['**/*.{js,css,html,ico,png,svg,webp}'],
-        navigateFallback: '/index.html',
-        // Database ya backend requests ko offline cache se touch nahi hone dega
-        navigateFallbackDenylist: [/^\/api/]
+        globPatterns: ['**/*.{js,css,html,ico,png,svg,webp}']
       }
     })
   ]
