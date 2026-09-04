@@ -30,12 +30,8 @@ export default function Dashboard({ themeConfig }) {
   const audioChunksRef = useRef([]);
 
   const refreshOfflineEntries = async () => {
-    try {
-      const offline = await getOfflineEntries();
-      setOfflineList(offline || []);
-    } catch (e) {
-      console.error('Offline fetch error:', e);
-    }
+    const offline = await getOfflineEntries();
+    setOfflineList(offline);
   };
 
   const fetchEntries = async () => {
@@ -51,21 +47,17 @@ export default function Dashboard({ themeConfig }) {
         setEntries(res.data);
       }
     } catch (err) {
-      console.error('Fetch entries failed:', err);
+      console.warn('Could not fetch cloud entries (working locally):', err.message);
     }
   };
 
+  // Background sync for offline files
   const syncOfflineEntries = async () => {
     if (!navigator.onLine || syncing) return;
     setSyncing(true);
 
     try {
       const pending = await getOfflineEntries();
-      if (!pending || pending.length === 0) {
-        setSyncing(false);
-        return;
-      }
-
       for (const item of pending) {
         const formData = new FormData();
         formData.append('title', item.title || 'Untitled Memory');
@@ -73,26 +65,21 @@ export default function Dashboard({ themeConfig }) {
         formData.append('moodEmoji', item.moodEmoji || '🍊');
 
         if (item.fileBlob) {
-          formData.append('media', item.fileBlob, item.fileName || 'offline-media');
+          formData.append('media', item.fileBlob, item.fileName || 'memo-media');
         }
 
         try {
           await axios.post(`${API_BASE}/api/entries`, formData, {
-            headers: {
-              Authorization: `Bearer ${localStorage.getItem('token')}`
-            },
-            timeout: 25000
+            headers: { Authorization: `Bearer ${localStorage.getItem('token')}` },
+            timeout: 20000
           });
           await deleteOfflineEntry(item.id);
         } catch (itemErr) {
-          console.error('Single sync failed:', item.id, itemErr);
+          console.error('Single note sync failed:', itemErr);
         }
       }
-
       await refreshOfflineEntries();
       await fetchEntries();
-    } catch (err) {
-      console.error('Sync batch failed:', err);
     } finally {
       setSyncing(false);
     }
@@ -104,6 +91,7 @@ export default function Dashboard({ themeConfig }) {
 
     const handleOnline = () => {
       setIsOnline(true);
+      fetchEntries();
       syncOfflineEntries();
     };
     const handleOffline = () => setIsOnline(false);
@@ -159,50 +147,46 @@ export default function Dashboard({ themeConfig }) {
     }
   };
 
+  // Nayi memory save karne ka direct flow
   const handleCreateEntry = async (e) => {
     e.preventDefault();
     if (!title.trim()) return;
     setLoading(true);
 
-    if (!navigator.onLine) {
-      await saveOfflineEntry({ title, content, moodEmoji }, file);
-      await refreshOfflineEntries();
-      setTitle('');
-      setContent('');
-      setFile(null);
-      setPreviewUrl(null);
-      setLoading(false);
-      return;
+    const memoryPayload = { title, content, moodEmoji };
+    const currentFile = file;
+
+    // Turant UI clear karein taaki user wait na kare
+    setTitle('');
+    setContent('');
+    setFile(null);
+    setPreviewUrl(null);
+
+    if (navigator.onLine) {
+      const formData = new FormData();
+      formData.append('title', memoryPayload.title);
+      formData.append('content', memoryPayload.content);
+      formData.append('moodEmoji', memoryPayload.moodEmoji);
+      if (currentFile) formData.append('media', currentFile);
+
+      try {
+        const res = await axios.post(`${API_BASE}/api/entries`, formData, {
+          headers: { Authorization: `Bearer ${localStorage.getItem('token')}` },
+          timeout: 25000
+        });
+        // Turant list mein naya entry dikhayein
+        setEntries(prev => [res.data, ...prev]);
+        setLoading(false);
+        return;
+      } catch (err) {
+        console.warn('Online upload failed, storing offline safely:', err);
+      }
     }
 
-    const formData = new FormData();
-    formData.append('title', title);
-    formData.append('content', content);
-    formData.append('moodEmoji', moodEmoji);
-    if (file) {
-      formData.append('media', file);
-    }
-
-    try {
-      await axios.post(`${API_BASE}/api/entries`, formData, {
-        headers: {
-          Authorization: `Bearer ${localStorage.getItem('token')}`
-        },
-        timeout: 25000
-      });
-
-      setTitle('');
-      setContent('');
-      setFile(null);
-      setPreviewUrl(null);
-      await fetchEntries();
-    } catch (err) {
-      console.error('Online upload failed, falling back to offline:', err);
-      await saveOfflineEntry({ title, content, moodEmoji }, file);
-      await refreshOfflineEntries();
-    } finally {
-      setLoading(false);
-    }
+    // Agar internet nahi hai ya connection cut hua:
+    await saveOfflineEntry(memoryPayload, currentFile);
+    await refreshOfflineEntries();
+    setLoading(false);
   };
 
   const handleDelete = async (id) => {
@@ -219,30 +203,33 @@ export default function Dashboard({ themeConfig }) {
 
   return (
     <div className="max-w-4xl mx-auto p-4 md:p-6 space-y-8">
+      {/* Offline Alert */}
       {!isOnline && (
         <div className="flex items-center gap-2 p-3 bg-amber-500/10 border border-amber-400 text-amber-700 dark:text-amber-300 rounded-2xl text-xs font-bold">
           <WifiOff className="w-4 h-4 shrink-0" />
-          <span>Offline Mode Active. Memories will be saved safely on your device.</span>
+          <span>Offline Mode. Memories will be saved directly on your phone and sync automatically when internet returns.</span>
         </div>
       )}
 
+      {/* Sync Banner */}
       {isOnline && offlineList.length > 0 && (
         <div className="flex items-center justify-between p-3 bg-emerald-500/10 border border-emerald-400 text-emerald-700 dark:text-emerald-300 rounded-2xl text-xs font-bold">
           <div className="flex items-center gap-2">
             <RefreshCw className={`w-4 h-4 shrink-0 ${syncing ? 'animate-spin' : ''}`} />
-            <span>{offlineList.length} offline note(s) ready to sync.</span>
+            <span>{offlineList.length} offline note(s) ready to sync to cloud.</span>
           </div>
           <button
             type="button"
             onClick={syncOfflineEntries}
             disabled={syncing}
-            className="px-3 py-1 bg-emerald-600 text-white rounded-xl text-xs font-bold cursor-pointer disabled:opacity-50"
+            className="px-3 py-1 bg-emerald-600 text-white rounded-xl text-xs font-bold cursor-pointer disabled:opacity-50 hover:bg-emerald-700"
           >
             {syncing ? 'Syncing...' : 'Sync Now'}
           </button>
         </div>
       )}
 
+      {/* New Memory Box */}
       <div className={`border-2 rounded-[2rem] p-6 shadow-sm transition-all ${themeConfig.cardBg} ${themeConfig.borderColor}`}>
         <div className="flex items-center gap-2 mb-4">
           <Sparkles className="w-5 h-5 opacity-75" />
@@ -357,10 +344,11 @@ export default function Dashboard({ themeConfig }) {
         </form>
       </div>
 
+      {/* Offline Pending Section */}
       {offlineList.length > 0 && (
         <div className="space-y-3">
           <h4 className="text-xs font-black uppercase tracking-wider text-amber-600 flex items-center gap-1">
-            <WifiOff className="w-3.5 h-3.5" /> Saved Offline on this device ({offlineList.length})
+            <WifiOff className="w-3.5 h-3.5" /> Saved Offline on this phone ({offlineList.length})
           </h4>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3 opacity-80">
             {offlineList.map((item) => (
@@ -369,7 +357,7 @@ export default function Dashboard({ themeConfig }) {
                   <span className="text-xl">{item.moodEmoji}</span>
                   <div>
                     <h5 className="font-bold text-xs">{item.title}</h5>
-                    <p className="text-[10px] opacity-60">Waiting for cloud sync</p>
+                    <p className="text-[10px] opacity-60">Pending cloud sync</p>
                   </div>
                 </div>
               </div>
@@ -378,6 +366,7 @@ export default function Dashboard({ themeConfig }) {
         </div>
       )}
 
+      {/* Timeline Section */}
       <div className="flex justify-between items-center">
         <h3 className={`font-black text-lg flex items-center gap-2 ${themeConfig.primaryText}`}>
           <span>Memories Timeline</span>
@@ -431,6 +420,7 @@ export default function Dashboard({ themeConfig }) {
         ))}
       </div>
 
+      {/* Open Entry Modal */}
       {selectedEntry && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
           <div className={`w-full max-w-lg border-2 rounded-[2rem] p-6 shadow-2xl space-y-4 max-h-[90vh] overflow-y-auto ${themeConfig.cardBg} ${themeConfig.borderColor}`}>
