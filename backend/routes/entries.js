@@ -2,75 +2,36 @@ const express = require('express');
 const router = express.Router();
 const Entry = require('../models/Entry');
 const auth = require('../middleware/auth');
-const cloudinary = require('cloudinary').v2;
-const { CloudinaryStorage } = require('multer-storage-cloudinary');
-const multer = require('multer');
 
-// Cloudinary Config
-cloudinary.config({
-  cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
-  api_key: process.env.CLOUDINARY_API_KEY,
-  api_secret: process.env.CLOUDINARY_API_SECRET
-});
-
-// Cloudinary Multer Storage
-const storage = new CloudinaryStorage({
-  cloudinary: cloudinary,
-  params: {
-    folder: 'rits_diary_media',
-    resource_type: 'auto',
-    allowed_formats: ['jpg', 'png', 'jpeg', 'webp', 'gif', 'mp4', 'mov', 'webm', 'mp3', 'wav', 'm4a', 'ogg']
-  }
-});
-
-const upload = multer({ 
-  storage: storage,
-  limits: { fileSize: 15 * 1024 * 1024 }
-});
-
-// 1. Get All Entries
+// 1. Get All User Entries
 router.get('/', auth, async (req, res) => {
   try {
     const entries = await Entry.find({ userId: req.user.id }).sort({ createdAt: -1 });
     res.json(entries);
   } catch (err) {
+    console.error('Fetch entries error:', err);
     res.status(500).json({ error: err.message });
   }
 });
 
-// 2. Create Entry (Ensuring HTTPS Clean URL)
-router.post('/', auth, upload.single('media'), async (req, res) => {
+// 2. Create Entry (Receives JSON with direct Cloudinary URL)
+router.post('/', auth, async (req, res) => {
   try {
-    const { title, content, moodEmoji } = req.body;
-    let mediaUrl = null;
-    let mediaType = 'none';
-
-    if (req.file) {
-      // Cloudinary safe https URL extraction
-      mediaUrl = req.file.secure_url || req.file.path || req.file.url;
-      const mime = req.file.mimetype || '';
-      
-      if (mime.startsWith('video/') || (mediaUrl && mediaUrl.match(/\.(mp4|mov|webm)$/i))) {
-        mediaType = 'video';
-      } else if (mime.startsWith('audio/') || (mediaUrl && mediaUrl.match(/\.(mp3|wav|m4a|ogg)$/i))) {
-        mediaType = 'audio';
-      } else {
-        mediaType = 'image';
-      }
-    }
+    const { title, content, moodEmoji, mediaUrl, mediaType } = req.body;
 
     const newEntry = new Entry({
       userId: req.user.id,
       title: title || 'Untitled Memory',
       content: content || '',
       moodEmoji: moodEmoji || '🍊',
-      mediaUrl: mediaUrl,
-      mediaType: mediaType
+      mediaUrl: mediaUrl || null,
+      mediaType: mediaType || 'none'
     });
 
     const savedEntry = await newEntry.save();
     res.status(201).json(savedEntry);
   } catch (err) {
+    console.error('Save entry error:', err);
     res.status(500).json({ error: err.message });
   }
 });
@@ -79,11 +40,14 @@ router.post('/', auth, upload.single('media'), async (req, res) => {
 router.delete('/:id', auth, async (req, res) => {
   try {
     const entry = await Entry.findOne({ _id: req.params.id, userId: req.user.id });
-    if (!entry) return res.status(404).json({ msg: 'Entry not found' });
+    if (!entry) {
+      return res.status(404).json({ msg: 'Entry not found' });
+    }
 
     await Entry.findByIdAndDelete(req.params.id);
     res.json({ msg: 'Entry deleted successfully' });
   } catch (err) {
+    console.error('Delete entry error:', err);
     res.status(500).json({ error: err.message });
   }
 });
