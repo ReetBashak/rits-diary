@@ -9,8 +9,6 @@ export default defineConfig({
     tailwindcss(),
     VitePWA({
       registerType: 'autoUpdate',
-      injectRegister: 'auto',
-      includeAssets: ['favicon.ico', 'apple-touch-icon.png'],
       manifest: {
         name: 'Viva La Vida — Tangerine Diary',
         short_name: 'Viva La Vida',
@@ -29,33 +27,6 @@ export default defineConfig({
             src: 'https://emojicdn.elk.sh/🍊?style=apple',
             sizes: '512x512',
             type: 'image/png'
-          }
-        ]
-      },
-      workbox: {
-        cleanupOutdatedCaches: true,
-        clientsClaim: true,
-        skipWaiting: true,
-        runtimeCaching: [
-          {
-            // Jab net on ho, hamesha live site khulegi (NetworkFirst)
-            urlPattern: ({ request }) => request.mode === 'navigate',
-            handler: 'NetworkFirst',
-            options: {
-              cacheName: 'viva-pages-cache',
-              networkTimeoutSeconds: 3
-            }
-          },
-          {
-            // Images aur static assets
-            urlPattern: ({ request }) =>
-              request.destination === 'style' ||
-              request.destination === 'script' ||
-              request.destination === 'worker',
-            handler: 'StaleWhileRevalidate',
-            options: {
-              cacheName: 'viva-static-assets'
-            }
           }
         ]
       }

@@ -1,6 +1,6 @@
 ﻿import { useState, useEffect, useRef } from 'react';
 import axios from 'axios';
-import { Trash2, Sparkles, Calendar, Paperclip, Eye, Mic, Square, Camera, X, Image as ImageIcon, LogOut } from 'lucide-react';
+import { Trash2, Sparkles, Calendar, Paperclip, Eye, Mic, Square, Camera, X, WifiOff, RefreshCw, Image as ImageIcon, LogOut } from 'lucide-react';
 
 const API_BASE = (import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000').replace(/\/$/, '');
 
@@ -13,19 +13,32 @@ const STICKER_CATEGORIES = {
 
 export default function Dashboard({ themeConfig }) {
   const [entries, setEntries] = useState([]);
+  const [offlineEntries, setOfflineEntries] = useState([]);
+  const [isOnline, setIsOnline] = useState(navigator.onLine);
   const [title, setTitle] = useState('');
   const [content, setContent] = useState('');
   const [moodEmoji, setMoodEmoji] = useState('🍊');
   const [file, setFile] = useState(null);
   const [previewUrl, setPreviewUrl] = useState(null);
   const [loading, setLoading] = useState(false);
+  const [syncing, setSyncing] = useState(false);
   const [selectedEntry, setSelectedEntry] = useState(null);
 
   const [isRecording, setIsRecording] = useState(false);
   const mediaRecorderRef = useRef(null);
   const audioChunksRef = useRef([]);
 
-  // Cloud memories fetch karna (Purani + Nayi dono)
+  // Load offline notes from localStorage
+  const loadOfflineNotes = () => {
+    try {
+      const saved = JSON.parse(localStorage.getItem('viva_offline_notes') || '[]');
+      setOfflineEntries(saved);
+    } catch {
+      setOfflineEntries([]);
+    }
+  };
+
+  // Fetch online cloud entries
   const fetchEntries = async () => {
     const token = localStorage.getItem('token');
     if (!token) return;
@@ -38,12 +51,57 @@ export default function Dashboard({ themeConfig }) {
         setEntries(res.data);
       }
     } catch (err) {
-      console.error('Fetch entries failed:', err);
+      console.error('Fetch entries error:', err);
     }
+  };
+
+  // Sync offline notes when online
+  const syncOfflineEntries = async () => {
+    const saved = JSON.parse(localStorage.getItem('viva_offline_notes') || '[]');
+    if (!navigator.onLine || saved.length === 0 || syncing) return;
+
+    setSyncing(true);
+    const remaining = [];
+
+    for (const item of saved) {
+      const formData = new FormData();
+      formData.append('title', item.title);
+      formData.append('content', item.content);
+      formData.append('moodEmoji', item.moodEmoji);
+
+      try {
+        await axios.post(`${API_BASE}/api/entries`, formData, {
+          headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
+        });
+      } catch {
+        remaining.push(item);
+      }
+    }
+
+    localStorage.setItem('viva_offline_notes', JSON.stringify(remaining));
+    setOfflineEntries(remaining);
+    setSyncing(false);
+    fetchEntries();
   };
 
   useEffect(() => {
     fetchEntries();
+    loadOfflineNotes();
+
+    const handleOnline = () => {
+      setIsOnline(true);
+      fetchEntries();
+      syncOfflineEntries();
+    };
+    const handleOffline = () => setIsOnline(false);
+
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+    };
   }, []);
 
   const handleFileChange = (selected) => {
@@ -88,34 +146,55 @@ export default function Dashboard({ themeConfig }) {
     }
   };
 
-  // Original Direct Multer Cloudinary Flow
   const handleCreateEntry = async (e) => {
     e.preventDefault();
     if (!title.trim()) return;
     setLoading(true);
 
-    const formData = new FormData();
-    formData.append('title', title.trim());
-    formData.append('content', content.trim());
-    formData.append('moodEmoji', moodEmoji);
-    if (file) formData.append('media', file);
+    // 1. If Online -> Direct Live Upload
+    if (navigator.onLine) {
+      const formData = new FormData();
+      formData.append('title', title.trim());
+      formData.append('content', content.trim());
+      formData.append('moodEmoji', moodEmoji);
+      if (file) formData.append('media', file);
 
-    try {
-      const res = await axios.post(`${API_BASE}/api/entries`, formData, {
-        headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
-      });
+      try {
+        const res = await axios.post(`${API_BASE}/api/entries`, formData, {
+          headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
+        });
 
-      setEntries(prev => [res.data, ...prev]);
-      setTitle('');
-      setContent('');
-      setFile(null);
-      setPreviewUrl(null);
-    } catch (err) {
-      alert('Failed to upload memory. Please try with a smaller file or check connection.');
-      console.error(err);
-    } finally {
-      setLoading(false);
+        setEntries(prev => [res.data, ...prev]);
+        setTitle('');
+        setContent('');
+        setFile(null);
+        setPreviewUrl(null);
+        setLoading(false);
+        return;
+      } catch (err) {
+        console.warn('Live upload failed, storing offline backup:', err);
+      }
     }
+
+    // 2. If Offline -> Save text locally
+    const memoryItem = {
+      id: Date.now(),
+      title: title.trim(),
+      content: content.trim(),
+      moodEmoji,
+      createdAt: new Date().toISOString()
+    };
+
+    const currentOffline = JSON.parse(localStorage.getItem('viva_offline_notes') || '[]');
+    currentOffline.unshift(memoryItem);
+    localStorage.setItem('viva_offline_notes', JSON.stringify(currentOffline));
+    setOfflineEntries(currentOffline);
+
+    setTitle('');
+    setContent('');
+    setFile(null);
+    setPreviewUrl(null);
+    setLoading(false);
   };
 
   const handleDelete = async (id) => {
@@ -135,7 +214,6 @@ export default function Dashboard({ themeConfig }) {
     window.location.reload();
   };
 
-  // Helper jo purani aur nayi dono tarah ki media fields ko read kar sake
   const getMediaInfo = (entry) => {
     const url = entry.mediaUrl || entry.imageUrl || null;
     let type = entry.mediaType || 'image';
@@ -151,11 +229,11 @@ export default function Dashboard({ themeConfig }) {
 
   return (
     <div className="max-w-4xl mx-auto p-4 md:p-6 space-y-8">
-      {/* Top Bar */}
+      {/* Header bar */}
       <div className="flex justify-between items-center bg-black/5 dark:bg-white/5 p-3 rounded-2xl">
         <div className="flex items-center gap-2 text-xs font-bold">
-          <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse" />
-          <span>Viva La Vida — Cloud Synced</span>
+          <span className={`w-2.5 h-2.5 rounded-full ${isOnline ? 'bg-emerald-500' : 'bg-amber-500'}`} />
+          <span>{isOnline ? 'Online (Cloud Active)' : 'Offline (Local Safe Mode)'}</span>
         </div>
         <button
           onClick={handleLogout}
@@ -165,7 +243,33 @@ export default function Dashboard({ themeConfig }) {
         </button>
       </div>
 
-      {/* New Memory Box */}
+      {/* Offline Alert */}
+      {!isOnline && (
+        <div className="flex items-center gap-2 p-3 bg-amber-500/10 border border-amber-400 text-amber-700 dark:text-amber-300 rounded-2xl text-xs font-bold">
+          <WifiOff className="w-4 h-4 shrink-0" />
+          <span>Offline mode active. Text notes will save on your phone and auto-sync when internet reconnects.</span>
+        </div>
+      )}
+
+      {/* Sync Button */}
+      {isOnline && offlineEntries.length > 0 && (
+        <div className="flex items-center justify-between p-3 bg-emerald-500/10 border border-emerald-400 text-emerald-700 dark:text-emerald-300 rounded-2xl text-xs font-bold">
+          <div className="flex items-center gap-2">
+            <RefreshCw className={`w-4 h-4 shrink-0 ${syncing ? 'animate-spin' : ''}`} />
+            <span>{offlineEntries.length} offline note(s) ready to upload.</span>
+          </div>
+          <button
+            type="button"
+            onClick={syncOfflineEntries}
+            disabled={syncing}
+            className="px-3 py-1 bg-emerald-600 text-white rounded-xl text-xs font-bold cursor-pointer disabled:opacity-50"
+          >
+            {syncing ? 'Syncing...' : 'Sync Now'}
+          </button>
+        </div>
+      )}
+
+      {/* Create Memory Form */}
       <div className={`border-2 rounded-[2rem] p-6 shadow-sm transition-all ${themeConfig.cardBg} ${themeConfig.borderColor}`}>
         <div className="flex items-center gap-2 mb-4">
           <Sparkles className="w-5 h-5 opacity-75" />
@@ -274,11 +378,33 @@ export default function Dashboard({ themeConfig }) {
               disabled={loading}
               className={`font-bold px-6 py-2 rounded-full text-sm shadow-md transition transform active:scale-95 disabled:opacity-50 cursor-pointer ${themeConfig.buttonPrimary}`}
             >
-              {loading ? 'Uploading...' : `Save Memory ${themeConfig.icon}`}
+              {loading ? 'Saving Memory...' : `Save Memory ${themeConfig.icon}`}
             </button>
           </div>
         </form>
       </div>
+
+      {/* Offline Pending Items */}
+      {offlineEntries.length > 0 && (
+        <div className="space-y-3">
+          <h4 className="text-xs font-black uppercase tracking-wider text-amber-600 flex items-center gap-1">
+            <WifiOff className="w-3.5 h-3.5" /> Stored locally on phone ({offlineEntries.length})
+          </h4>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            {offlineEntries.map((item) => (
+              <div key={item.id} className="border border-dashed border-amber-400 rounded-2xl p-3 bg-amber-50/40 flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <span className="text-xl">{item.moodEmoji}</span>
+                  <div>
+                    <h5 className="font-bold text-xs">{item.title}</h5>
+                    <p className="text-[10px] opacity-60">Pending cloud sync</p>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Cloud Timeline Header */}
       <div className="flex justify-between items-center">
@@ -338,7 +464,7 @@ export default function Dashboard({ themeConfig }) {
         })}
       </div>
 
-      {/* Open Entry Modal */}
+      {/* Entry Modal */}
       {selectedEntry && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
           <div className={`w-full max-w-lg border-2 rounded-[2rem] p-6 shadow-2xl space-y-4 max-h-[90vh] overflow-y-auto ${themeConfig.cardBg} ${themeConfig.borderColor}`}>
