@@ -12,6 +12,19 @@ const STICKER_CATEGORIES = {
   Gaming: ['🎮', '👾', '🕹️', '⚡', '🎧', '🏆', '🔥', '⚔️'],
 };
 
+// Helper to turn base64 back into actual file for Cloudinary upload
+function dataURLtoFile(dataurl, filename) {
+  const arr = dataurl.split(',');
+  const mime = arr[0].match(/:(.*?);/)[1];
+  const bstr = atob(arr[1]);
+  let n = bstr.length;
+  const u8arr = new Uint8Array(n);
+  while (n--) {
+    u8arr[n] = bstr.charCodeAt(n);
+  }
+  return new File([u8arr], filename, { type: mime });
+}
+
 export default function Dashboard({ themeConfig }) {
   const [entries, setEntries] = useState([]);
   const [offlineList, setOfflineList] = useState([]);
@@ -30,8 +43,8 @@ export default function Dashboard({ themeConfig }) {
   const audioChunksRef = useRef([]);
 
   const refreshOfflineEntries = async () => {
-    const offline = await getOfflineEntries();
-    setOfflineList(offline);
+    const list = await getOfflineEntries();
+    setOfflineList(list);
   };
 
   const fetchEntries = async () => {
@@ -47,39 +60,48 @@ export default function Dashboard({ themeConfig }) {
         setEntries(res.data);
       }
     } catch (err) {
-      console.warn('Could not fetch cloud entries (working locally):', err.message);
+      console.warn('Fetch entries failed:', err.message);
     }
   };
 
-  // Background sync for offline files
   const syncOfflineEntries = async () => {
     if (!navigator.onLine || syncing) return;
     setSyncing(true);
 
     try {
       const pending = await getOfflineEntries();
+      if (!pending || pending.length === 0) {
+        setSyncing(false);
+        return;
+      }
+
       for (const item of pending) {
         const formData = new FormData();
         formData.append('title', item.title || 'Untitled Memory');
         formData.append('content', item.content || '');
         formData.append('moodEmoji', item.moodEmoji || '🍊');
 
-        if (item.fileBlob) {
-          formData.append('media', item.fileBlob, item.fileName || 'memo-media');
+        if (item.base64File) {
+          const recoveredFile = dataURLtoFile(item.base64File, item.fileName || 'offline-media.jpg');
+          formData.append('media', recoveredFile);
         }
 
         try {
           await axios.post(`${API_BASE}/api/entries`, formData, {
             headers: { Authorization: `Bearer ${localStorage.getItem('token')}` },
-            timeout: 20000
+            timeout: 30000
           });
+          // Upload kamyab hone par offline se delete karein
           await deleteOfflineEntry(item.id);
         } catch (itemErr) {
-          console.error('Single note sync failed:', itemErr);
+          console.error('Error syncing individual entry:', item.id, itemErr);
         }
       }
+
       await refreshOfflineEntries();
       await fetchEntries();
+    } catch (err) {
+      console.error('Global sync failed:', err);
     } finally {
       setSyncing(false);
     }
@@ -147,7 +169,6 @@ export default function Dashboard({ themeConfig }) {
     }
   };
 
-  // Nayi memory save karne ka direct flow
   const handleCreateEntry = async (e) => {
     e.preventDefault();
     if (!title.trim()) return;
@@ -156,12 +177,13 @@ export default function Dashboard({ themeConfig }) {
     const memoryPayload = { title, content, moodEmoji };
     const currentFile = file;
 
-    // Turant UI clear karein taaki user wait na kare
+    // Reset UI inputs
     setTitle('');
     setContent('');
     setFile(null);
     setPreviewUrl(null);
 
+    // Agar internet chalu hai toh sidha upload
     if (navigator.onLine) {
       const formData = new FormData();
       formData.append('title', memoryPayload.title);
@@ -174,16 +196,15 @@ export default function Dashboard({ themeConfig }) {
           headers: { Authorization: `Bearer ${localStorage.getItem('token')}` },
           timeout: 25000
         });
-        // Turant list mein naya entry dikhayein
-        setEntries(prev => [res.data, ...prev]);
+        setEntries((prev) => [res.data, ...prev]);
         setLoading(false);
         return;
       } catch (err) {
-        console.warn('Online upload failed, storing offline safely:', err);
+        console.warn('Network unstable. Storing safely offline:', err.message);
       }
     }
 
-    // Agar internet nahi hai ya connection cut hua:
+    // Offline / Fallback handling
     await saveOfflineEntry(memoryPayload, currentFile);
     await refreshOfflineEntries();
     setLoading(false);
@@ -194,7 +215,7 @@ export default function Dashboard({ themeConfig }) {
       await axios.delete(`${API_BASE}/api/entries/${id}`, {
         headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
       });
-      setEntries(entries.filter(entry => entry._id !== id));
+      setEntries(entries.filter((entry) => entry._id !== id));
       setSelectedEntry(null);
     } catch (err) {
       console.error(err);
@@ -203,33 +224,30 @@ export default function Dashboard({ themeConfig }) {
 
   return (
     <div className="max-w-4xl mx-auto p-4 md:p-6 space-y-8">
-      {/* Offline Alert */}
       {!isOnline && (
         <div className="flex items-center gap-2 p-3 bg-amber-500/10 border border-amber-400 text-amber-700 dark:text-amber-300 rounded-2xl text-xs font-bold">
           <WifiOff className="w-4 h-4 shrink-0" />
-          <span>Offline Mode. Memories will be saved directly on your phone and sync automatically when internet returns.</span>
+          <span>Offline Mode. Memories are saved locally on your phone and will sync when online.</span>
         </div>
       )}
 
-      {/* Sync Banner */}
       {isOnline && offlineList.length > 0 && (
         <div className="flex items-center justify-between p-3 bg-emerald-500/10 border border-emerald-400 text-emerald-700 dark:text-emerald-300 rounded-2xl text-xs font-bold">
           <div className="flex items-center gap-2">
             <RefreshCw className={`w-4 h-4 shrink-0 ${syncing ? 'animate-spin' : ''}`} />
-            <span>{offlineList.length} offline note(s) ready to sync to cloud.</span>
+            <span>{offlineList.length} offline note(s) ready to sync.</span>
           </div>
           <button
             type="button"
             onClick={syncOfflineEntries}
             disabled={syncing}
-            className="px-3 py-1 bg-emerald-600 text-white rounded-xl text-xs font-bold cursor-pointer disabled:opacity-50 hover:bg-emerald-700"
+            className="px-3 py-1 bg-emerald-600 text-white rounded-xl text-xs font-bold cursor-pointer disabled:opacity-50 hover:bg-emerald-700 transition"
           >
             {syncing ? 'Syncing...' : 'Sync Now'}
           </button>
         </div>
       )}
 
-      {/* New Memory Box */}
       <div className={`border-2 rounded-[2rem] p-6 shadow-sm transition-all ${themeConfig.cardBg} ${themeConfig.borderColor}`}>
         <div className="flex items-center gap-2 mb-4">
           <Sparkles className="w-5 h-5 opacity-75" />
@@ -275,9 +293,9 @@ export default function Dashboard({ themeConfig }) {
           {previewUrl && (
             <div className="relative w-24 h-24 rounded-2xl overflow-hidden border-2 border-orange-300">
               <img src={previewUrl} alt="Preview" className="w-full h-full object-cover" />
-              <X 
-                className="absolute top-1 right-1 w-5 h-5 bg-black/60 text-white rounded-full p-0.5 cursor-pointer" 
-                onClick={() => { setFile(null); setPreviewUrl(null); }} 
+              <X
+                className="absolute top-1 right-1 w-5 h-5 bg-black/60 text-white rounded-full p-0.5 cursor-pointer"
+                onClick={() => { setFile(null); setPreviewUrl(null); }}
               />
             </div>
           )}
@@ -344,7 +362,6 @@ export default function Dashboard({ themeConfig }) {
         </form>
       </div>
 
-      {/* Offline Pending Section */}
       {offlineList.length > 0 && (
         <div className="space-y-3">
           <h4 className="text-xs font-black uppercase tracking-wider text-amber-600 flex items-center gap-1">
@@ -366,7 +383,6 @@ export default function Dashboard({ themeConfig }) {
         </div>
       )}
 
-      {/* Timeline Section */}
       <div className="flex justify-between items-center">
         <h3 className={`font-black text-lg flex items-center gap-2 ${themeConfig.primaryText}`}>
           <span>Memories Timeline</span>
@@ -402,10 +418,10 @@ export default function Dashboard({ themeConfig }) {
 
             {entry.mediaUrl && entry.mediaType === 'image' && (
               <div className="w-full h-36 rounded-xl overflow-hidden border border-black/5">
-                <img 
-                  src={entry.mediaUrl} 
-                  alt={entry.title} 
-                  className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300" 
+                <img
+                  src={entry.mediaUrl}
+                  alt={entry.title}
+                  className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
                   crossOrigin="anonymous"
                 />
               </div>
@@ -420,7 +436,6 @@ export default function Dashboard({ themeConfig }) {
         ))}
       </div>
 
-      {/* Open Entry Modal */}
       {selectedEntry && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
           <div className={`w-full max-w-lg border-2 rounded-[2rem] p-6 shadow-2xl space-y-4 max-h-[90vh] overflow-y-auto ${themeConfig.cardBg} ${themeConfig.borderColor}`}>
@@ -447,10 +462,10 @@ export default function Dashboard({ themeConfig }) {
               {selectedEntry.mediaUrl && (
                 <div className="rounded-2xl overflow-hidden border border-black/10 bg-black/5">
                   {selectedEntry.mediaType === 'image' && (
-                    <img 
-                      src={selectedEntry.mediaUrl} 
-                      alt={selectedEntry.title} 
-                      className="w-full max-h-96 object-contain" 
+                    <img
+                      src={selectedEntry.mediaUrl}
+                      alt={selectedEntry.title}
+                      className="w-full max-h-96 object-contain"
                       crossOrigin="anonymous"
                     />
                   )}

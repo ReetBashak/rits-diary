@@ -1,5 +1,5 @@
-const DB_NAME = 'TangerineDiaryDB';
-const DB_VERSION = 2;
+const DB_NAME = 'TangerineDiaryDB_v3';
+const DB_VERSION = 1;
 const STORE_NAME = 'offline_entries';
 
 export function openDB() {
@@ -16,16 +16,30 @@ export function openDB() {
   });
 }
 
+// Convert file to base64 so phone doesn't drop it offline
+function fileToBase64(file) {
+  return new Promise((resolve, reject) => {
+    if (!file) return resolve(null);
+    const reader = new FileReader();
+    reader.readAsDataURL(file);
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = (error) => reject(error);
+  });
+}
+
 export async function saveOfflineEntry(entryData, file) {
   try {
+    const base64Data = await fileToBase64(file);
     const db = await openDB();
     return new Promise((resolve, reject) => {
       const tx = db.transaction(STORE_NAME, 'readwrite');
       const store = tx.objectStore(STORE_NAME);
 
       const record = {
-        ...entryData,
-        fileBlob: file || null,
+        title: entryData.title || 'Untitled Memory',
+        content: entryData.content || '',
+        moodEmoji: entryData.moodEmoji || '🍊',
+        base64File: base64Data || null,
         fileName: file ? file.name : null,
         fileType: file ? file.type : null,
         createdAt: new Date().toISOString()
@@ -36,7 +50,7 @@ export async function saveOfflineEntry(entryData, file) {
       req.onerror = () => reject(req.error);
     });
   } catch (err) {
-    console.error('Failed to save in indexedDB:', err);
+    console.error('Storage write error:', err);
   }
 }
 
@@ -66,6 +80,6 @@ export async function deleteOfflineEntry(id) {
       req.onerror = () => reject(req.error);
     });
   } catch (err) {
-    console.error('Delete offline error:', err);
+    console.error('Storage delete error:', err);
   }
 }
